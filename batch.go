@@ -25,8 +25,9 @@ type WriteBatch struct {
 	sync.Mutex
 	txn *Txn
 	db  *DB
-	wg  sync.WaitGroup
 	err error
+
+	pendingCh chan struct{}
 }
 
 // NewWriteBatch creates a new WriteBatch. This provides a way to conveniently do a lot of writes,
@@ -35,7 +36,17 @@ type WriteBatch struct {
 // creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
 func (db *DB) NewWriteBatch() *WriteBatch {
-	return &WriteBatch{db: db, txn: db.newTransaction(true, true)}
+	return &WriteBatch{
+		db:        db,
+		txn:       db.newTransaction(true, true),
+		pendingCh: make(chan struct{}, 16), // Allow 16 pending txns by default.
+	}
+}
+
+func (wb *WriteBatch) WaitForPending() {
+	close(wb.pendingCh)
+	for range wb.pendingCh {
+	}
 }
 
 // Cancel function must be called if there's a chance that Flush might not get
@@ -46,13 +57,15 @@ func (db *DB) NewWriteBatch() *WriteBatch {
 //
 // Note that any committed writes would still go through despite calling Cancel.
 func (wb *WriteBatch) Cancel() {
-	wb.wg.Wait()
+	wb.WaitForPending()
 	wb.txn.Discard()
 }
 
 func (wb *WriteBatch) callback(err error) {
 	// sync.WaitGroup is thread-safe, so it doesn't need to be run inside wb.Lock.
-	defer wb.wg.Done()
+	defer func() {
+		<-wb.pendingCh
+	}()
 	if err == nil {
 		return
 	}
@@ -124,7 +137,7 @@ func (wb *WriteBatch) commit() error {
 	}
 	// Get a new txn before we commit this one. So, the new txn doesn't need
 	// to wait for this one to commit.
-	wb.wg.Add(1)
+	wb.pendingCh <- struct{}{} // This would also ensure that we don't create too many transactions.
 	wb.txn.CommitWith(wb.callback)
 	wb.txn = wb.db.newTransaction(true, true)
 	wb.txn.readTs = 0 // We're not reading anything.
@@ -139,7 +152,7 @@ func (wb *WriteBatch) Flush() error {
 	wb.txn.Discard()
 	wb.Unlock()
 
-	wb.wg.Wait()
+	wb.WaitForPending()
 	// Safe to access error without any synchronization here.
 	return wb.err
 }
