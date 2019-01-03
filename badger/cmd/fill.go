@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
 	"github.com/spf13/cobra"
 )
@@ -54,6 +55,8 @@ func fill(cmd *cobra.Command, args []string) error {
 	opts.Dir = sstDir
 	opts.ValueDir = vlogDir
 	opts.Truncate = truncate
+	opts.TableLoadingMode = options.FileIO
+	opts.ValueLogLoadingMode = options.FileIO
 	opts.SyncWrites = false
 	opts.CompactL0OnClose = force
 
@@ -69,13 +72,16 @@ func fill(cmd *cobra.Command, args []string) error {
 
 	start := time.Now()
 	batch := db.NewWriteBatch()
+
+	// Let's reuse value, so we don't cause a lot of memory usage.
+	val := make([]byte, valSz)
+	y.Check2(rand.Read(val))
+
 	num := int64(numKeys * mil)
 	for i := int64(1); i <= num; i++ {
 		k := make([]byte, keySz)
-		v := make([]byte, valSz)
 		y.Check2(rand.Read(k))
-		y.Check2(rand.Read(v))
-		if err := batch.Set(k, v, 0); err != nil {
+		if err := batch.Set(k, val, 0); err != nil {
 			return err
 		}
 		if i%1e5 == 0 {
