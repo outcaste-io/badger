@@ -213,7 +213,14 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 
 		list := &pb.KVList{}
 		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
-			return err
+			// If there is some error while parsing list, it might be the case we are trying to
+			// restore some old backup. Hence try to parse it as single KV also.
+			kv := &pb.KV{}
+			if err = kv.Unmarshal(unmarshalBuf[:sz]); err != nil {
+				return err // if still getting error, then return
+			} else {
+				list.Kv = append(list.Kv, kv)
+			}
 		}
 
 		for _, kv := range list.Kv {
