@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 
 	"github.com/dgraph-io/badger/pb"
@@ -213,13 +214,20 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 
 		list := &pb.KVList{}
 		if err := list.Unmarshal(unmarshalBuf[:sz]); err != nil {
+			fmt.Println("error while list parsing is: ", err)
 			// If there is some error while parsing list, it might be the case we are trying to
 			// restore some old backup. Hence try to parse it as single KV also.
 			kv := &pb.KV{}
 			if err = kv.Unmarshal(unmarshalBuf[:sz]); err != nil {
 				return err // if still getting error, then return
 			} else {
+				fmt.Println("kv marshallled successfully ", len(kv.Key))
 				list.Kv = append(list.Kv, kv)
+			}
+		} else {
+			fmt.Println("****************************** list marshal success ", len(list.Kv))
+			for _, kv := range list.Kv {
+				fmt.Println(kv.Key, kv.Value)
 			}
 		}
 
@@ -227,6 +235,7 @@ func (db *DB) Load(r io.Reader, maxPendingWrites int) error {
 			if err := ldr.set(kv); err != nil {
 				return err
 			}
+			// fmt.Println("kv added to db")
 
 			// Update nextTxnTs, memtable stores this
 			// timestamp in badger head when flushed.
