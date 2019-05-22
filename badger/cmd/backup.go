@@ -17,7 +17,7 @@
 package cmd
 
 import (
-	"bufio"
+	"compress/gzip"
 	"os"
 
 	"github.com/dgraph-io/badger"
@@ -66,18 +66,18 @@ func doBackup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	bw := bufio.NewWriterSize(f, 64<<20)
+	bw, err := gzip.NewWriterLevel(f, gzip.BestCompression)
+	if err != nil {
+		return err
+	}
 	if _, err = db.Backup(bw, 0); err != nil {
 		return err
 	}
-
-	if err = bw.Flush(); err != nil {
+	if err = bw.Close(); err != nil {
 		return err
 	}
-
 	if err = f.Sync(); err != nil {
 		return err
 	}
-
 	return f.Close()
 }
