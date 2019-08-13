@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
 	"github.com/stretchr/testify/require"
 )
@@ -64,6 +65,26 @@ func TestPickTables(t *testing.T) {
 	outside("abd", "a", "ab")
 	outside("abd", "ab", "abc")
 	outside("abd", "ab", "abc123")
+}
+
+func TestPickTabless(t *testing.T) {
+	genTable := func(left, right string) *tableMock {
+		return &tableMock{left: []byte(left), right: []byte(right)}
+	}
+	t1 := genTable("abc", "cde")
+	t2 := genTable("cde", "cge")
+	opt := DefaultIteratorOptions
+	opt.Prefix = []byte("c")
+	opt.prefixIsKey = false
+	ts := []table.TableInterface{t1, t2}
+	out := opt.pickTables(ts)
+	require.Equal(t, 2, len(out))
+	opt.Prefix = []byte("c")
+	t1 = genTable("abc", "cde")
+	t2 = genTable("dde", "gge")
+	ts = []table.TableInterface{t1, t2}
+	out = opt.pickTables(ts)
+	require.Equal(t, 1, len(out))
 }
 
 func TestIteratePrefix(t *testing.T) {

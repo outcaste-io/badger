@@ -263,11 +263,7 @@ func (s *levelHandler) appendIterators(iters []y.Iterator, opt *IteratorOptions)
 	defer s.RUnlock()
 
 	tables := make([]*table.Table, 0, len(s.tables))
-	for _, t := range s.tables {
-		if opt.pickTable(t) {
-			tables = append(tables, t)
-		}
-	}
+	tables = opt.pickTables(s.tables)
 	if len(tables) == 0 {
 		return iters
 	}
