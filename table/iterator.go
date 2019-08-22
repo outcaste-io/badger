@@ -159,6 +159,7 @@ type Iterator struct {
 	// Internally, Iterator is bidirectional. However, we only expose the
 	// unidirectional functionality for now.
 	reversed bool
+	blk      *block
 }
 
 // NewIterator returns a new iterator of the Table
@@ -191,7 +192,8 @@ func (itr *Iterator) seekToFirst() {
 		return
 	}
 	itr.bpos = 0
-	block, err := itr.t.block(itr.bpos)
+	block, err := itr.t.block(itr.bpos, itr.blk)
+	itr.blk = block
 	if err != nil {
 		itr.err = err
 		return
@@ -208,7 +210,8 @@ func (itr *Iterator) seekToLast() {
 		return
 	}
 	itr.bpos = numBlocks - 1
-	block, err := itr.t.block(itr.bpos)
+	block, err := itr.t.block(itr.bpos, itr.blk)
+	itr.blk = block
 	if err != nil {
 		itr.err = err
 		return
@@ -220,7 +223,8 @@ func (itr *Iterator) seekToLast() {
 
 func (itr *Iterator) seekHelper(blockIdx int, key []byte) {
 	itr.bpos = blockIdx
-	block, err := itr.t.block(blockIdx)
+	block, err := itr.t.block(blockIdx, itr.blk)
+	itr.blk = block
 	if err != nil {
 		itr.err = err
 		return
@@ -293,7 +297,8 @@ func (itr *Iterator) next() {
 	}
 
 	if len(itr.bi.data) == 0 {
-		block, err := itr.t.block(itr.bpos)
+		block, err := itr.t.block(itr.bpos, itr.blk)
+		itr.blk = block
 		if err != nil {
 			itr.err = err
 			return
@@ -321,7 +326,8 @@ func (itr *Iterator) prev() {
 	}
 
 	if len(itr.bi.data) == 0 {
-		block, err := itr.t.block(itr.bpos)
+		block, err := itr.t.block(itr.bpos, itr.blk)
+		itr.blk = block
 		if err != nil {
 			itr.err = err
 			return

@@ -289,16 +289,17 @@ func (t *Table) readIndex() error {
 	return nil
 }
 
-func (t *Table) block(idx int) (*block, error) {
+func (t *Table) block(idx int, blk *block) (*block, error) {
 	y.AssertTruef(idx >= 0, "idx=%d", idx)
 	if idx >= len(t.blockIndex) {
 		return nil, errors.New("block out of index")
 	}
 
 	ko := t.blockIndex[idx]
-	blk := &block{
-		offset: int(ko.Offset),
+	if blk == nil {
+		blk = &block{}
 	}
+	blk.offset = int(ko.Offset)
 	var err error
 	blk.data, err = t.read(blk.offset, int(ko.Len))
 
@@ -355,7 +356,7 @@ func (t *Table) DoesNotHave(key []byte) bool { return !t.bf.Has(farm.Fingerprint
 // OpenTable() function. This function is also called inside levelsController.VerifyChecksum().
 func (t *Table) VerifyChecksum() error {
 	for i, os := range t.blockIndex {
-		b, err := t.block(i)
+		b, err := t.block(i, nil)
 		if err != nil {
 			return y.Wrapf(err, "checksum validation failed for table: %s, block: %d, offset:%d",
 				t.Filename(), i, os.Offset)
