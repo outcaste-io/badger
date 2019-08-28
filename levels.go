@@ -153,6 +153,7 @@ func newLevelsController(db *DB, mf *Manifest) (*levelsController, error) {
 			opts := table.Options{
 				LoadingMode: db.opt.TableLoadingMode,
 				ChkMode:     db.opt.ChecksumVerificationMode,
+				Cache:       db.cache,
 			}
 			t, err := table.OpenTable(fd, opts)
 			if err != nil {
@@ -583,6 +584,7 @@ func (s *levelsController) compactBuildTables(
 			opts := table.Options{
 				LoadingMode: s.kv.opt.TableLoadingMode,
 				ChkMode:     s.kv.opt.ChecksumVerificationMode,
+				Cache:       s.kv.cache,
 			}
 			tbl, err := table.OpenTable(fd, opts)
 			// decrRef is added below.

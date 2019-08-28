@@ -36,6 +36,7 @@ import (
 	"github.com/dgraph-io/badger/skl"
 	"github.com/dgraph-io/badger/table"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	humanize "github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/net/trace"
@@ -89,7 +90,8 @@ type DB struct {
 
 	orc *oracle
 
-	pub *publisher
+	pub   *publisher
+	cache *ristretto.Cache // singleton block cache. will be used across the tables.
 }
 
 const (
@@ -270,6 +272,16 @@ func Open(opt Options) (db *DB, err error) {
 		}
 	}()
 
+	// capacity need to be tuned.
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: int64(1000 * 10),
+		MaxCost:     int64(1000),
+		BufferItems: 64,
+	})
+	if err != nil {
+		return nil, y.Wrapf(err, "error while creating cache.")
+	}
+
 	db = &DB{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
@@ -281,6 +293,7 @@ func Open(opt Options) (db *DB, err error) {
 		valueDirGuard: valueDirLockGuard,
 		orc:           newOracle(opt),
 		pub:           newPublisher(),
+		cache:         cache,
 	}
 
 	// Calculate initial size.
@@ -915,6 +928,7 @@ func (db *DB) handleFlushTask(ft flushTask) error {
 	opts := table.Options{
 		LoadingMode: db.opt.TableLoadingMode,
 		ChkMode:     db.opt.ChecksumVerificationMode,
+		Cache:       db.cache,
 	}
 	tbl, err := table.OpenTable(fd, opts)
 	if err != nil {

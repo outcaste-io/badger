@@ -34,10 +34,12 @@ import (
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/pb"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 	"github.com/dgraph-io/ristretto/z"
 )
 
 const fileSuffix = ".sst"
+const blockCachePrefix = "blockcache"
 
 // Options contains configurable options for Table/Builder.
 type Options struct {
@@ -56,6 +58,8 @@ type Options struct {
 
 	// BlockSize is the size of each block inside SSTable in bytes.
 	BlockSize int
+
+	Cache *ristretto.Cache
 }
 
 // TableInterface is useful for testing.
@@ -296,6 +300,12 @@ func (t *Table) block(idx int) (*block, error) {
 		return nil, errors.New("block out of index")
 	}
 
+	// Try to get the block from cache.
+	cachedBlock, exist := t.opt.Cache.Get(t.blockCacheKey(idx))
+	if exist {
+		return cachedBlock.(*block), nil
+	}
+
 	ko := t.blockIndex[idx]
 	blk := &block{
 		offset: int(ko.Offset),
@@ -330,7 +340,14 @@ func (t *Table) block(idx int) (*block, error) {
 			return nil, err
 		}
 	}
+	go func() {
+		t.opt.Cache.Set(t.blockCacheKey(idx), blk, 1)
+	}()
 	return blk, err
+}
+
+func (t *Table) blockCacheKey(idx int) string {
+	return fmt.Sprintf("%s_%d_%d", blockCachePrefix, t.ID(), idx)
 }
 
 // Size is its file size in bytes

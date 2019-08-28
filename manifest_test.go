@@ -166,7 +166,7 @@ func TestOverlappingKeyRangeError(t *testing.T) {
 	lh0 := newLevelHandler(kv, 0)
 	lh1 := newLevelHandler(kv, 1)
 	f := buildTestTable(t, "k", 2)
-	opts := table.Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+	opts := table.Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead, Cache: generateCache(t)}
 	t1, err := table.OpenTable(f, opts)
 	require.NoError(t, err)
 	defer t1.DecrRef()

@@ -27,14 +27,25 @@ import (
 
 	"github.com/dgraph-io/badger/options"
 	"github.com/dgraph-io/badger/y"
+	"github.com/dgraph-io/ristretto"
 )
+
+func generateCache(t *testing.T) *ristretto.Cache {
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: int64(1000 * 10),
+		MaxCost:     int64(1000),
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	return cache
+}
 
 func TestTableIndex(t *testing.T) {
 	rand.Seed(time.Now().Unix())
 	keyPrefix := "key"
 	t.Run("single key", func(t *testing.T) {
 		f := buildTestTable(t, keyPrefix, 1)
-		opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead}
+		opts := Options{LoadingMode: options.MemoryMap, ChkMode: options.OnTableAndBlockRead, Cache: generateCache(t)}
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err)
 		require.Len(t, tbl.blockIndex, 1)
@@ -65,7 +76,7 @@ func TestTableIndex(t *testing.T) {
 		}
 		f.Write(builder.Finish())
 
-		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead}
+		opts = Options{LoadingMode: options.LoadToRAM, ChkMode: options.OnTableAndBlockRead, Cache: generateCache(t)}
 		tbl, err := OpenTable(f, opts)
 		require.NoError(t, err, "unable to open table")
 
