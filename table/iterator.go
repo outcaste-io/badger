@@ -391,8 +391,8 @@ func (itr *Iterator) Seek(key []byte) {
 // ConcatIterator concatenates the sequences defined by several iterators.  (It only works with
 // TableIterators, probably just because it's faster to not be so generic.)
 type ConcatIterator struct {
-	idx      int // Which iterator is active now.
-	cur      *Iterator
+	idx *int // Which iterator is active now.
+	// cur      *Iterator
 	iters    []*Iterator // Corresponds to tables.
 	tables   []*Table    // Disregarding reversed, this is in ascending order.
 	reversed bool
@@ -409,24 +409,25 @@ func NewConcatIterator(tbls []*Table, reversed bool) ConcatIterator {
 		// Save cycles by not initializing the iterators until needed.
 		// iters[i] = tbls[i].NewIterator(reversed)
 	}
+	i := -1
 	return ConcatIterator{
 		reversed: reversed,
 		iters:    iters,
 		tables:   tbls,
-		idx:      -1, // Not really necessary because s.it.Valid()=false, but good to have.
+		idx:      &i, // Not really necessary because s.it.Valid()=false, but good to have.
 	}
 }
 
-func (s *ConcatIterator) setIdx(idx int) {
-	s.idx = idx
+func (s ConcatIterator) setIdx(idx int) {
+	*s.idx = idx
 	if idx < 0 || idx >= len(s.iters) {
-		s.cur = nil
+		*s.idx = -1
 		return
 	}
 	if s.iters[idx] == nil {
 		s.iters[idx] = s.tables[idx].NewIterator(s.reversed)
 	}
-	s.cur = s.iters[s.idx]
+	// s.cur = s.iters[idx]
 }
 
 // Rewind implements y.Interface
@@ -439,22 +440,32 @@ func (s ConcatIterator) Rewind() {
 	} else {
 		s.setIdx(len(s.iters) - 1)
 	}
-	s.cur.Rewind()
+	s.cur().Rewind()
+	// s.cur.Rewind()
 }
 
 // Valid implements y.Interface
 func (s ConcatIterator) Valid() bool {
-	return s.cur != nil && s.cur.Valid()
+	return *s.idx >= 0 && *s.idx < len(s.iters) && s.cur().Valid()
+	// return s.cur != nil && s.cur.Valid()
 }
 
 // Key implements y.Interface
 func (s ConcatIterator) Key() []byte {
-	return s.cur.Key()
+	return s.cur().Key()
+}
+
+func (s ConcatIterator) cur() *Iterator {
+	idx := *s.idx
+	if idx < 0 || idx >= len(s.iters) {
+		return nil
+	}
+	return s.iters[*s.idx]
 }
 
 // Value implements y.Interface
 func (s ConcatIterator) Value() y.ValueStruct {
-	return s.cur.Value()
+	return s.cur().Value()
 }
 
 // Seek brings us to element >= key if reversed is false. Otherwise, <= key.
@@ -477,28 +488,30 @@ func (s ConcatIterator) Seek(key []byte) {
 	// For reversed=false, we know s.tables[i-1].Biggest() < key. Thus, the
 	// previous table cannot possibly contain key.
 	s.setIdx(idx)
-	s.cur.Seek(key)
+	s.cur().Seek(key)
 }
 
 // Next advances our concat iterator.
 func (s ConcatIterator) Next() {
-	s.cur.Next()
-	if s.cur.Valid() {
+	cur := s.cur()
+	cur.Next()
+	if cur.Valid() {
 		// Nothing to do. Just stay with the current table.
 		return
 	}
 	for { // In case there are empty tables.
 		if !s.reversed {
-			s.setIdx(s.idx + 1)
+			s.setIdx(*s.idx + 1)
 		} else {
-			s.setIdx(s.idx - 1)
+			s.setIdx(*s.idx - 1)
 		}
-		if s.cur == nil {
+		cur = s.cur()
+		if cur == nil {
 			// End of list. Valid will become false.
 			return
 		}
-		s.cur.Rewind()
-		if s.cur.Valid() {
+		cur.Rewind()
+		if cur.Valid() {
 			break
 		}
 	}
