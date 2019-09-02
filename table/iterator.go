@@ -399,7 +399,7 @@ type ConcatIterator struct {
 }
 
 // NewConcatIterator creates a new concatenated iterator
-func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
+func NewConcatIterator(tbls []*Table, reversed bool) ConcatIterator {
 	iters := make([]*Iterator, len(tbls))
 	for i := 0; i < len(tbls); i++ {
 		// Increment the reference count. Since, we're not creating the iterator right now.
@@ -409,7 +409,7 @@ func NewConcatIterator(tbls []*Table, reversed bool) *ConcatIterator {
 		// Save cycles by not initializing the iterators until needed.
 		// iters[i] = tbls[i].NewIterator(reversed)
 	}
-	return &ConcatIterator{
+	return ConcatIterator{
 		reversed: reversed,
 		iters:    iters,
 		tables:   tbls,
@@ -430,7 +430,7 @@ func (s *ConcatIterator) setIdx(idx int) {
 }
 
 // Rewind implements y.Interface
-func (s *ConcatIterator) Rewind() {
+func (s ConcatIterator) Rewind() {
 	if len(s.iters) == 0 {
 		return
 	}
@@ -443,22 +443,22 @@ func (s *ConcatIterator) Rewind() {
 }
 
 // Valid implements y.Interface
-func (s *ConcatIterator) Valid() bool {
+func (s ConcatIterator) Valid() bool {
 	return s.cur != nil && s.cur.Valid()
 }
 
 // Key implements y.Interface
-func (s *ConcatIterator) Key() []byte {
+func (s ConcatIterator) Key() []byte {
 	return s.cur.Key()
 }
 
 // Value implements y.Interface
-func (s *ConcatIterator) Value() y.ValueStruct {
+func (s ConcatIterator) Value() y.ValueStruct {
 	return s.cur.Value()
 }
 
 // Seek brings us to element >= key if reversed is false. Otherwise, <= key.
-func (s *ConcatIterator) Seek(key []byte) {
+func (s ConcatIterator) Seek(key []byte) {
 	var idx int
 	if !s.reversed {
 		idx = sort.Search(len(s.tables), func(i int) bool {
@@ -481,7 +481,7 @@ func (s *ConcatIterator) Seek(key []byte) {
 }
 
 // Next advances our concat iterator.
-func (s *ConcatIterator) Next() {
+func (s ConcatIterator) Next() {
 	s.cur.Next()
 	if s.cur.Valid() {
 		// Nothing to do. Just stay with the current table.
@@ -505,7 +505,7 @@ func (s *ConcatIterator) Next() {
 }
 
 // Close implements y.Interface.
-func (s *ConcatIterator) Close() error {
+func (s ConcatIterator) Close() error {
 	for _, t := range s.tables {
 		// DeReference the tables while closing the iterator.
 		if err := t.DecrRef(); err != nil {

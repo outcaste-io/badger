@@ -470,15 +470,15 @@ type UniIterator struct {
 }
 
 // NewUniIterator returns a UniIterator.
-func (s *Skiplist) NewUniIterator(reversed bool) *UniIterator {
-	return &UniIterator{
+func (s *Skiplist) NewUniIterator(reversed bool) UniIterator {
+	return UniIterator{
 		iter:     s.NewIterator(),
 		reversed: reversed,
 	}
 }
 
 // Next implements y.Interface
-func (s *UniIterator) Next() {
+func (s UniIterator) Next() {
 	if !s.reversed {
 		s.iter.Next()
 	} else {
@@ -487,7 +487,7 @@ func (s *UniIterator) Next() {
 }
 
 // Rewind implements y.Interface
-func (s *UniIterator) Rewind() {
+func (s UniIterator) Rewind() {
 	if !s.reversed {
 		s.iter.SeekToFirst()
 	} else {
@@ -496,7 +496,7 @@ func (s *UniIterator) Rewind() {
 }
 
 // Seek implements y.Interface
-func (s *UniIterator) Seek(key []byte) {
+func (s UniIterator) Seek(key []byte) {
 	if !s.reversed {
 		s.iter.Seek(key)
 	} else {
@@ -505,13 +505,13 @@ func (s *UniIterator) Seek(key []byte) {
 }
 
 // Key implements y.Interface
-func (s *UniIterator) Key() []byte { return s.iter.Key() }
+func (s UniIterator) Key() []byte { return s.iter.Key() }
 
 // Value implements y.Interface
-func (s *UniIterator) Value() y.ValueStruct { return s.iter.Value() }
+func (s UniIterator) Value() y.ValueStruct { return s.iter.Value() }
 
 // Valid implements y.Interface
-func (s *UniIterator) Valid() bool { return s.iter.Valid() }
+func (s UniIterator) Valid() bool { return s.iter.Valid() }
 
 // Close implements y.Interface (and frees up the iter's resources)
-func (s *UniIterator) Close() error { return s.iter.Close() }
+func (s UniIterator) Close() error { return s.iter.Close() }
