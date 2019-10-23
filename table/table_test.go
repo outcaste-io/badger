@@ -76,7 +76,7 @@ func buildTable(t *testing.T, keyValues [][]string, opts Options) *os.File {
 	defer b.Close()
 	// TODO: Add test for file garbage collection here. No files should be left after the tests here.
 
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int31())
 	f, err := y.CreateSyncedFile(filename, true)
 	if t != nil {
 		require.NoError(t, err)
@@ -699,7 +699,7 @@ func TestTableBigValues(t *testing.T) {
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int31())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(t, err, "unable to create file")
 
@@ -810,7 +810,7 @@ func BenchmarkReadMerged(b *testing.B) {
 	require.NoError(b, err)
 
 	for i := 0; i < m; i++ {
-		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+		filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int31())
 		opts := Options{Compression: options.ZSTD, BlockSize: 4 * 1024, BloomFalsePositive: 0.01}
 		opts.Cache = cache
 		builder := NewTableBuilder(opts)
@@ -906,7 +906,7 @@ func getTableForBenchmarks(b *testing.B, count int, cache *ristretto.Cache) *Tab
 	}
 	opts.Cache = cache
 	builder := NewTableBuilder(opts)
-	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int63())
+	filename := fmt.Sprintf("%s%s%d.sst", os.TempDir(), string(os.PathSeparator), rand.Int31())
 	f, err := y.OpenSyncedFile(filename, true)
 	require.NoError(b, err)
 	for i := 0; i < count; i++ {

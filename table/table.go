@@ -94,6 +94,7 @@ type Table struct {
 	// The following are initialized once and const.
 	smallest, biggest []byte // Smallest and largest keys (with timestamps).
 	id                uint64 // file id, part of filename
+	decompressionBuf  []byte
 
 	bf       *z.Bloom
 	Checksum []byte
@@ -188,11 +189,12 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 		return nil, errors.Errorf("Invalid filename: %s", filename)
 	}
 	t := &Table{
-		fd:         fd,
-		ref:        1, // Caller is given one reference.
-		id:         id,
-		opt:        &opts,
-		IsInmemory: false,
+		fd:               fd,
+		ref:              1, // Caller is given one reference.
+		id:               id,
+		opt:              &opts,
+		IsInmemory:       false,
+		decompressionBuf: make([]byte, opts.BlockSize),
 	}
 
 	t.tableSize = int(fileInfo.Size())
@@ -243,12 +245,13 @@ func OpenTable(fd *os.File, opts Options) (*Table, error) {
 func OpenInMemoryTable(data []byte, id uint64, opt *Options) (*Table, error) {
 	opt.LoadingMode = options.LoadToRAM
 	t := &Table{
-		ref:        1, // Caller is given one reference.
-		opt:        opt,
-		mmap:       data,
-		tableSize:  len(data),
-		IsInmemory: true,
-		id:         id, // It is important that each table gets a unique ID.
+		ref:              1, // Caller is given one reference.
+		opt:              opt,
+		mmap:             data,
+		tableSize:        len(data),
+		IsInmemory:       true,
+		id:               id, // It is important that each table gets a unique ID.
+		decompressionBuf: make([]byte, opt.BlockSize),
 	}
 
 	if err := t.initBiggestAndSmallest(); err != nil {
@@ -533,13 +536,14 @@ func NewFilename(id uint64, dir string) string {
 
 // decompressData decompresses the given data.
 func (t *Table) decompressData(data []byte) ([]byte, error) {
+	t.decompressionBuf = t.decompressionBuf[:0]
 	switch t.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Decode(nil, data)
+		return snappy.Decode(t.decompressionBuf, data)
 	case options.ZSTD:
-		return zstd.Decompress(nil, data)
+		return zstd.Decompress(t.decompressionBuf, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }

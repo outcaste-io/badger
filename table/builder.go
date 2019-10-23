@@ -75,16 +75,18 @@ type Builder struct {
 	tableIndex *pb.TableIndex
 	keyHashes  []uint64
 
-	opt *Options
+	compressionBuf []byte
+	opt            *Options
 }
 
 // NewTableBuilder makes a new TableBuilder.
 func NewTableBuilder(opts Options) *Builder {
 	return &Builder{
-		buf:        newBuffer(1 << 20),
-		tableIndex: &pb.TableIndex{},
-		keyHashes:  make([]uint64, 0, 1024), // Avoid some malloc calls.
-		opt:        &opts,
+		buf:            newBuffer(1 << 20),
+		tableIndex:     &pb.TableIndex{},
+		keyHashes:      make([]uint64, 0, 1024), // Avoid some malloc calls.
+		compressionBuf: make([]byte, opts.BlockSize),
+		opt:            &opts,
 	}
 }
 
@@ -341,13 +343,14 @@ func (b *Builder) shouldEncrypt() bool {
 
 // compressData compresses the given data.
 func (b *Builder) compressData(data []byte) ([]byte, error) {
+	b.compressionBuf = b.compressionBuf[:0]
 	switch b.opt.Compression {
 	case options.None:
 		return data, nil
 	case options.Snappy:
-		return snappy.Encode(nil, data), nil
+		return snappy.Encode(b.compressionBuf, data), nil
 	case options.ZSTD:
-		return zstd.Compress(nil, data)
+		return zstd.Compress(b.compressionBuf, data)
 	}
 	return nil, errors.New("Unsupported compression type")
 }
