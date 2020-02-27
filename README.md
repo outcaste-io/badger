@@ -746,6 +746,7 @@ above).
 ## Other Projects Using Badger
 Below is a list of known projects that use Badger:
 
+* [New York Times] - Reordered 57 million events in-memory using BadgerDB.
 * [0-stor](https://github.com/zero-os/0-stor) - Single device object store.
 * [Dgraph](https://github.com/dgraph-io/dgraph) - Distributed graph database.
 * [Jaeger](https://github.com/jaegertracing/jaeger) - Distributed tracing platform.
