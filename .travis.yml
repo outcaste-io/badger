@@ -40,9 +40,9 @@ notifications:
 script: >-
     if [ $TRAVIS_OS_NAME = "linux" ] && [ $go_32 ]; then
       uname -a
-      GOOS=linux GOARCH=arm go test -v ./...
+      GOOS=linux GOARCH=arm go test -v ./... || travis_terminate 1
     else
-      go test -v ./...
+      go test -v ./... || travis_terminate 1
       # Cross-compile for Plan 9
-      GOOS=plan9 go build ./...
+      GOOS=plan9 go build ./... || travis_terminate 1
     fi
