@@ -359,7 +359,6 @@ func exceedsSize(prefix string, max int64, key []byte) error {
 }
 
 const maxKeySize = 65000
-const maxValSize = 1 << 20
 
 func ValidEntry(db *DB, key, val []byte) error {
 	switch {
@@ -372,8 +371,8 @@ func ValidEntry(db *DB, key, val []byte) error {
 		// keep things safe and allow badger move prefix and a timestamp suffix, let's
 		// cut it down to 65000, instead of using 65536.
 		return exceedsSize("Key", maxKeySize, key)
-	case int64(len(val)) > maxValSize:
-		return exceedsSize("Value", maxValSize, val)
+	case int64(len(val)) > db.opt.MaxValueSize:
+		return exceedsSize("Value", db.opt.MaxValueSize, val)
 	}
 	if err := db.isBanned(key); err != nil {
 		return err
