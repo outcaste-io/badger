@@ -234,9 +234,9 @@ func (mt *memTable) DecrRef() {
 	mt.sl.DecrRef()
 }
 
-func (mt *memTable) replayFunction(opt Options) func(Entry, valuePointer) error {
+func (mt *memTable) replayFunction(opt Options) func(Entry) error {
 	first := true
-	return func(e Entry, _ valuePointer) error { // Function for replaying.
+	return func(e Entry) error { // Function for replaying.
 		if first {
 			opt.Debugf("First key=%q\n", e.Key)
 		}
@@ -465,7 +465,6 @@ func (lf *logFile) iterate(readOnly bool, offset uint32, fn logEntry) (uint32, e
 	var validEndOffset uint32 = offset
 
 	var entries []*Entry
-	var vptrs []valuePointer
 
 loop:
 	for {
@@ -503,7 +502,6 @@ loop:
 				break loop
 			}
 			entries = append(entries, e)
-			vptrs = append(vptrs, vp)
 
 		case e.meta&bitFinTxn > 0:
 			txnTs, err := strconv.ParseUint(string(e.Value), 10, 64)
@@ -514,9 +512,8 @@ loop:
 			lastCommit = 0
 			validEndOffset = read.recordOffset
 
-			for i, e := range entries {
-				vp := vptrs[i]
-				if err := fn(*e, vp); err != nil {
+			for _, e := range entries {
+				if err := fn(*e); err != nil {
 					if errors.Is(err, errStop) {
 						break
 					}
@@ -524,7 +521,6 @@ loop:
 				}
 			}
 			entries = entries[:0]
-			vptrs = vptrs[:0]
 
 		default:
 			if lastCommit != 0 {
@@ -534,7 +530,7 @@ loop:
 			}
 			validEndOffset = read.recordOffset
 
-			if err := fn(*e, vp); err != nil {
+			if err := fn(*e); err != nil {
 				if errors.Is(err, errStop) {
 					break
 				}

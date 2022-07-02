@@ -416,7 +416,7 @@ func (w *sortedWriter) handleRequests() {
 	defer w.closer.Done()
 
 	process := func(req *request) {
-		for i, e := range req.Entries {
+		for _, e := range req.Entries {
 			// If badger is running in InMemory mode, len(req.Ptrs) == 0.
 			// Sorted stream writer receives Key-Value (not a pointer to value). So, its upto the
 			// writer (and not the sender) to determine if the Value goes to vlog or stays in SST

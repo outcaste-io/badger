@@ -42,6 +42,25 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Values have their first byte being byteData or byteDelete. This helps us distinguish between
+// a key that has never been seen and a key that has been explicitly deleted.
+const (
+	bitDelete                 byte = 1 << 0 // Set if the key has been deleted.
+	bitValuePointerX          byte = 1 << 1 // Set if the value is NOT stored directly next to key.
+	BitDiscardEarlierVersions byte = 1 << 2 // Set if earlier versions can be discarded.
+	// Set if item shouldn't be discarded via compactions (used by merge operator)
+	bitMergeEntry byte = 1 << 3
+	// The MSB 2 bits are for transactions.
+	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
+	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
+
+	// size of vlog header.
+	// +----------------+------------------+
+	// | keyID(8 bytes) |  baseIV(12 bytes)|
+	// +----------------+------------------+
+	vlogHeaderSize = 20
+)
+
 var (
 	badgerPrefix = []byte("!badger!")       // Prefix for internal keys used by badger.
 	txnKey       = []byte("!badger!txn")    // For indicating end of entries in txn.
@@ -115,7 +134,6 @@ type DB struct {
 
 	orc              *oracle
 	bannedNamespaces *lockedKeys
-	threshold        *vlogThreshold
 
 	pub        *publisher
 	registry   *KeyRegistry
@@ -243,7 +261,6 @@ func Open(opt Options) (*DB, error) {
 		pub:              newPublisher(),
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
-		threshold:        initVlogThreshold(&opt),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -359,8 +376,6 @@ func Open(opt Options) (*DB, error) {
 	// compaction when run in offline mode via the flatten tool.
 	db.orc.readMark.Done(db.orc.nextTxnTs)
 	db.orc.incrementNextTs()
-
-	go db.threshold.listenForValueThresholdUpdate()
 
 	if err := db.initBannedNamespaces(); err != nil {
 		return db, errors.Wrapf(err, "While setting banned keys")
@@ -597,7 +612,6 @@ func (db *DB) close() (err error) {
 	db.indexCache.Close()
 
 	atomic.StoreUint32(&db.isClosed, 1)
-	db.threshold.close()
 
 	if db.opt.InMemory {
 		return
@@ -1748,7 +1762,6 @@ func (db *DB) dropAll() (func(), error) {
 	db.lc.nextFileID = 1
 	db.blockCache.Clear()
 	db.indexCache.Clear()
-	db.threshold.Clear(db.opt)
 	return resume, nil
 }
 
