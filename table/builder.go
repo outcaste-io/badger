@@ -333,15 +333,16 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 // AddStaleKey is same is Add function but it also increments the internal
 // staleDataSize counter. This value will be used to prioritize this table for
 // compaction.
-func (b *Builder) AddStaleKey(key []byte, v y.ValueStruct, valueLen uint32) {
+func (b *Builder) AddStaleKey(key []byte, v y.ValueStruct) {
 	// Rough estimate based on how much space it will occupy in the SST.
 	b.staleDataSize += len(key) + len(v.Value) + 4 /* entry offset */ + 4 /* header size */
-	b.addInternal(key, v, valueLen, true)
+	b.addInternal(key, v, 0, true)
 }
 
 // Add adds a key-value pair to the block.
-func (b *Builder) Add(key []byte, value y.ValueStruct, valueLen uint32) {
-	b.addInternal(key, value, valueLen, false)
+func (b *Builder) Add(key []byte, value y.ValueStruct) {
+	// TODO: Fix up addInternal
+	b.addInternal(key, value, 0, false)
 }
 
 func (b *Builder) addInternal(key []byte, value y.ValueStruct, valueLen uint32, isStale bool) {

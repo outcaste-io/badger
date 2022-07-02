@@ -81,9 +81,6 @@ type Options struct {
 	NumLevelZeroTables      int
 	NumLevelZeroTablesStall int
 
-	ValueLogFileSize   int64
-	ValueLogMaxEntries uint32
-
 	NumCompactors        int
 	CompactL0OnClose     bool
 	LmaxCompaction       bool
@@ -175,14 +172,6 @@ func DefaultOptions(path string) Options {
 		// Benchmark code can be found in table/builder_test.go file
 		ZSTDCompressionLevel: 1,
 
-		// Nothing to read/write value log using standard File I/O
-		// MemoryMap to mmap() the value log files
-		// (2^30 - 1)*2 when mmapping < 2^31 - 1, max int32.
-		// -1 so 2*ValueLogFileSize won't overflow on 32-bit systems.
-		ValueLogFileSize: 1<<30 - 1,
-
-		ValueLogMaxEntries: 1000000,
-
 		VLogPercentile: 0.0,
 		ValueThreshold: maxValueThreshold,
 
@@ -224,12 +213,8 @@ const (
 // log, and make Badger act more like a typical LSM tree.
 func LSMOnlyOptions(path string) Options {
 	// Let's not set any other options, because they can cause issues with the
-	// size of key-value a user can pass to Badger. For e.g., if we set
-	// ValueLogFileSize to 64MB, a user can't pass a value more than that.
-	// Setting it to ValueLogMaxEntries to 1000, can generate too many files.
-	// These options are better configured on a usage basis, than broadly here.
-	// The ValueThreshold is the most important setting a user needs to do to
-	// achieve a heavier usage of LSM tree.
+	// size of key-value a user can pass to Badger.
+	//
 	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
 	// of performance reasons, 1KB would be a good option too, allowing
 	// values smaller than 1KB to be collocated with the keys in the LSM tree.
@@ -509,23 +494,6 @@ func (opt Options) WithValueThreshold(val int64) Options {
 	return opt
 }
 
-// WithVLogPercentile returns a new Options value with ValLogPercentile set to given value.
-//
-// VLogPercentile with 0.0 means no dynamic thresholding is enabled.
-// MinThreshold value will always act as the value threshold.
-//
-// VLogPercentile with value 0.99 means 99 percentile of value will be put in LSM tree
-// and only 1 percent in vlog. The value threshold will be dynamically updated within the range of
-// [ValueThreshold, Options.maxValueThreshold]
-//
-// Say VLogPercentile with 1.0 means threshold will eventually set to Options.maxValueThreshold
-//
-// The default value of VLogPercentile is 0.0.
-func (opt Options) WithVLogPercentile(t float64) Options {
-	opt.VLogPercentile = t
-	return opt
-}
-
 // WithNumMemtables returns a new Options value with NumMemtables set to the given value.
 //
 // NumMemtables sets the maximum number of tables to keep in memory before stalling.
@@ -595,24 +563,6 @@ func (opt Options) WithNumLevelZeroTablesStall(val int) Options {
 // The default value is 10MB.
 func (opt Options) WithBaseLevelSize(val int64) Options {
 	opt.BaseLevelSize = val
-	return opt
-}
-
-// WithValueLogFileSize sets the maximum size of a single value log file.
-//
-// The default value of ValueLogFileSize is 1GB.
-func (opt Options) WithValueLogFileSize(val int64) Options {
-	opt.ValueLogFileSize = val
-	return opt
-}
-
-// WithValueLogMaxEntries sets the maximum number of entries a value log file
-// can hold approximately.  A actual size limit of a value log file is the
-// minimum of ValueLogFileSize and ValueLogMaxEntries.
-//
-// The default value of ValueLogMaxEntries is one million (1000000).
-func (opt Options) WithValueLogMaxEntries(val uint32) Options {
-	opt.ValueLogMaxEntries = val
 	return opt
 }
 
