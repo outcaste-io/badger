@@ -1666,40 +1666,6 @@ func TestReadOnly(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestLSMOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	opts := LSMOnlyOptions(dir)
-	dopts := DefaultOptions(dir)
-
-	dopts.ValueThreshold = 1 << 21
-	_, err = Open(dopts)
-	require.Contains(t, err.Error(), "Invalid ValueThreshold")
-
-	// Also test for error, when ValueThresholdSize is greater than maxBatchSize.
-	dopts.ValueThreshold = LSMOnlyOptions(dir).ValueThreshold
-	// maxBatchSize is calculated from MaxTableSize.
-	dopts.MemTableSize = int64(LSMOnlyOptions(dir).ValueThreshold)
-	_, err = Open(dopts)
-	require.Error(t, err, "db creation should have been failed")
-	require.Contains(t, err.Error(),
-		fmt.Sprintf("Valuethreshold %d greater than max batch size", dopts.ValueThreshold))
-
-	db, err := Open(opts)
-	require.NoError(t, err)
-
-	value := make([]byte, 128)
-	_, err = rand.Read(value)
-	for i := 0; i < 500; i++ {
-		require.NoError(t, err)
-		txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), value, 0x00)
-	}
-	require.NoError(t, db.Close())
-
-}
-
 // This test function is doing some intricate sorcery.
 func TestMinReadTs(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
@@ -1958,7 +1924,6 @@ func TestForceFlushMemtable(t *testing.T) {
 	require.NoError(t, err, "temp dir for badger count not be created")
 
 	ops := getTestOptions(dir)
-	ops.ValueLogMaxEntries = 1
 
 	db, err := Open(ops)
 	require.NoError(t, err, "error while openning db")
@@ -2175,30 +2140,6 @@ func TestOpenDBReadOnly(t *testing.T) {
 	read()
 	require.Equal(t, 10, count)
 	require.NoError(t, db.Close())
-
-	ops.ReadOnly = false
-	db, err = Open(ops)
-	require.NoError(t, err)
-	// Add bunch of entries that go into value log.
-	require.NoError(t, db.Update(func(txn *Txn) error {
-		require.Greater(t, db.valueThreshold(), int64(10))
-		val := make([]byte, db.valueThreshold()+10)
-		rand.Read(val)
-		for i := 0; i < 10; i++ {
-			key := fmt.Sprintf("KEY-%05d", i)
-			require.NoError(t, txn.Set([]byte(key), val))
-			mp[key] = val
-		}
-		return nil
-	}))
-	require.NoError(t, db.Close())
-
-	ops.ReadOnly = true
-	db, err = Open(ops)
-	require.NoError(t, err)
-	read()
-	require.Equal(t, 20, count)
-	require.NoError(t, db.Close())
 }
 
 func TestBannedPrefixes(t *testing.T) {
@@ -2207,15 +2148,10 @@ func TestBannedPrefixes(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	opt := getTestOptions(dir).WithNamespaceOffset(3)
-	// All values go into vlog files. This is for checking if banned keys are properly decoded on DB
-	// restart.
-	opt.ValueThreshold = 0
-	opt.ValueLogMaxEntries = 2
 	// We store the uint64 namespace at idx=3, so first 3 bytes are insignificant to us.
 	initialBytes := make([]byte, opt.NamespaceOffset)
 	db, err := Open(opt)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(db.vlog.filesMap))
 
 	var keys [][]byte
 	var allPrefixes []uint64 = []uint64{1234, 3456, 5678, 7890, 901234}
@@ -2270,7 +2206,6 @@ func TestBannedPrefixes(t *testing.T) {
 	bannedPrefixes[5678] = struct{}{}
 	validate()
 
-	require.Greater(t, len(db.vlog.filesMap), 1)
 	require.NoError(t, db.Close())
 
 	db, err = Open(opt)
@@ -2467,7 +2402,6 @@ func TestSeekTs(t *testing.T) {
 func TestCompactL0OnClose(t *testing.T) {
 	opt := getTestOptions("")
 	opt.CompactL0OnClose = true
-	opt.ValueThreshold = 1 // Every value goes to value log
 	opt.NumVersionsToKeep = 1
 	runBadgerTest(t, &opt, func(t *testing.T, db *DB) {
 		var keys [][]byte

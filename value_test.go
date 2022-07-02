@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
-	"math"
 	"math/rand"
 	"os"
 	"testing"
@@ -117,7 +116,6 @@ func TestReadOnlyOpenWithPartialAppendToWAL(t *testing.T) {
 
 	// Create skeleton files.
 	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	require.NoError(t, kv.Close())
@@ -155,7 +153,6 @@ func createMemFile(t *testing.T, entries []*Entry) ([]byte, uint32) {
 	defer removeDir(dir)
 
 	opts := getTestOptions(dir)
-	opts.ValueLogFileSize = 100 * 1024 * 1024 // 100Mb
 	kv, err := Open(opts)
 	require.NoError(t, err)
 	defer kv.Close()
@@ -300,71 +297,6 @@ func (th *testHelper) readRange(from, to int) {
 	}
 }
 
-func BenchmarkReadWrite(b *testing.B) {
-	rwRatio := []float32{
-		0.1, 0.2, 0.5, 1.0,
-	}
-	valueSize := []int{
-		64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384,
-	}
-
-	for _, vsz := range valueSize {
-		for _, rw := range rwRatio {
-			b.Run(fmt.Sprintf("%3.1f,%04d", rw, vsz), func(b *testing.B) {
-				dir, err := ioutil.TempDir("", "vlog-benchmark")
-				y.Check(err)
-				defer removeDir(dir)
-				opts := getTestOptions(dir)
-				opts.ValueThreshold = 0
-				db, err := Open(opts)
-				y.Check(err)
-
-				vl := &db.vlog
-				b.ResetTimer()
-
-				for i := 0; i < b.N; i++ {
-					e := new(Entry)
-					e.Key = make([]byte, 16)
-					e.Value = make([]byte, vsz)
-					bl := new(request)
-					bl.Entries = []*Entry{e}
-
-					var ptrs []valuePointer
-
-					vl.write([]*request{bl})
-					ptrs = append(ptrs, bl.Ptrs...)
-
-					f := rand.Float32()
-					if f < rw {
-						vl.write([]*request{bl})
-
-					} else {
-						ln := len(ptrs)
-						if ln == 0 {
-							b.Fatalf("Zero length of ptrs")
-						}
-						idx := rand.Intn(ln)
-						buf, lf, err := vl.readValueBytes(ptrs[idx])
-						if err != nil {
-							b.Fatalf("Benchmark Read: %v", err)
-						}
-
-						e, err := lf.decodeEntry(buf, ptrs[idx].Offset)
-						require.NoError(b, err)
-						if len(e.Key) != 16 {
-							b.Fatalf("Key is invalid")
-						}
-						if len(e.Value) != vsz {
-							b.Fatalf("Value is invalid")
-						}
-						runCallback(db.vlog.getUnlockCallback(lf))
-					}
-				}
-			})
-		}
-	}
-}
-
 // Regression test for https://github.com/dgraph-io/badger/issues/817
 // This test verifies if fully corrupted memtables are deleted on reopen.
 func TestValueLogTruncate(t *testing.T) {
@@ -403,7 +335,6 @@ func TestValueLogTruncate(t *testing.T) {
 	// We should have one memtable and one sst file.
 	require.Equal(t, fileCountBeforeCorruption+1, fileCountAfterCorruption)
 	// maxFid will be 2 because we increment the max fid on DB open everytime.
-	require.Equal(t, 2, int(db.vlog.maxFid))
 	require.NoError(t, db.Close())
 }
 
@@ -434,11 +365,9 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		opt := getTestOptions(dir)
 		opt.VerifyValueChecksum = true
-		opt.ValueThreshold = 32
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		require.Greater(t, int64(len(v)), db.vlog.db.valueThreshold())
 		txnSet(t, db, k, v, 0)
 		require.NoError(t, db.Close())
 
@@ -455,170 +384,4 @@ func TestValueEntryChecksum(t *testing.T) {
 
 		require.NoError(t, db.Close())
 	})
-	// Regression test for https://github.com/dgraph-io/badger/issues/1049
-	t.Run("Corruption", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
-		require.NoError(t, err)
-		defer removeDir(dir)
-
-		opt := getTestOptions(dir)
-		opt.VerifyValueChecksum = true
-		opt.ValueThreshold = 32
-		db, err := Open(opt)
-		require.NoError(t, err)
-
-		require.Greater(t, int64(len(v)), db.vlog.db.valueThreshold())
-		txnSet(t, db, k, v, 0)
-
-		path := db.vlog.fpath(1)
-		require.NoError(t, db.Close())
-
-		file, err := os.OpenFile(path, os.O_RDWR, 0644)
-		require.NoError(t, err)
-		offset := 50
-		orig := make([]byte, 1)
-		_, err = file.ReadAt(orig, int64(offset))
-		require.NoError(t, err)
-		// Corrupt a single bit.
-		_, err = file.WriteAt([]byte{7}, int64(offset))
-		require.NoError(t, err)
-		require.NoError(t, file.Close())
-
-		db, err = Open(opt)
-		require.NoError(t, err)
-
-		txn := db.NewTransaction(false)
-		entry, err := txn.Get(k)
-		require.NoError(t, err)
-
-		// TODO(ibrahim): This test is broken since we're not returning errors
-		// in case we cannot read the values. This is incorrect behavior but
-		// we're doing this to debug an issue where the values are being read
-		// from old vlog files.
-		_, _ = entry.ValueCopy(nil)
-		// require.Error(t, err)
-		// require.Contains(t, err.Error(), "ErrEOF")
-		// require.Nil(t, x)
-
-		require.NoError(t, db.Close())
-	})
-}
-
-func TestValidateWrite(t *testing.T) {
-	// Mocking the file size, so that we don't allocate big memory while running test.
-	maxVlogFileSize = 400
-	defer func() {
-		maxVlogFileSize = math.MaxUint32
-	}()
-
-	bigBuf := make([]byte, maxVlogFileSize+1)
-	log := &valueLog{
-		opt: DefaultOptions("."),
-	}
-
-	// Sending a request with big values which will overflow uint32.
-	key := []byte("HelloKey")
-	req := &request{
-		Entries: []*Entry{
-			{
-				Key:   key,
-				Value: bigBuf,
-			},
-			{
-				Key:   key,
-				Value: bigBuf,
-			},
-			{
-				Key:   key,
-				Value: bigBuf,
-			},
-		},
-	}
-
-	err := log.validateWrites([]*request{req})
-	require.Error(t, err)
-
-	// Testing with small values.
-	smallBuf := make([]byte, 4)
-	req1 := &request{
-		Entries: []*Entry{
-			{
-				Key:   key,
-				Value: smallBuf,
-			},
-			{
-				Key:   key,
-				Value: smallBuf,
-			},
-			{
-				Key:   key,
-				Value: smallBuf,
-			},
-		},
-	}
-
-	err = log.validateWrites([]*request{req1})
-	require.NoError(t, err)
-
-	// Batching small and big request.
-	err = log.validateWrites([]*request{req1, req})
-	require.Error(t, err)
-}
-
-func TestValueLogMeta(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	y.Check(err)
-	defer removeDir(dir)
-
-	opt := getTestOptions(dir).WithValueThreshold(16)
-	db, _ := Open(opt)
-	defer db.Close()
-	txn := db.NewTransaction(true)
-	for i := 0; i < 10; i++ {
-		k := []byte(fmt.Sprintf("key=%d", i))
-		v := []byte(fmt.Sprintf("val=%020d", i))
-		require.NoError(t, txn.SetEntry(NewEntry(k, v)))
-	}
-	require.NoError(t, txn.Commit())
-	fids := db.vlog.sortedFids()
-	require.Equal(t, 1, len(fids))
-
-	// vlog entries must not have txn meta.
-	db.vlog.filesMap[fids[0]].iterate(true, 0, func(e Entry, vp valuePointer) error {
-		require.Zero(t, e.meta&(bitTxn|bitFinTxn))
-		return nil
-	})
-
-	// Entries in LSM tree must have txn bit of meta set
-	txn = db.NewTransaction(false)
-	defer txn.Discard()
-	iopt := DefaultIteratorOptions
-	key := []byte("key")
-	iopt.Prefix = key
-	itr := txn.NewIterator(iopt)
-	defer itr.Close()
-	var count int
-	for itr.Seek(key); itr.ValidForPrefix(key); itr.Next() {
-		item := itr.Item()
-		require.Equal(t, bitTxn, item.meta&(bitTxn|bitFinTxn))
-		count++
-	}
-	require.Equal(t, 10, count)
-}
-
-// This tests asserts the condition that vlog fids start from 1.
-// TODO(naman): should this be changed to assert instead?
-func TestFirstVlogFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	opt := DefaultOptions(dir)
-	db, err := Open(opt)
-	require.NoError(t, err)
-	defer db.Close()
-
-	fids := db.vlog.sortedFids()
-	require.NotZero(t, len(fids))
-	require.Equal(t, uint32(1), fids[0])
 }

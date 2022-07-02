@@ -25,8 +25,6 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,77 +39,6 @@ import (
 	"github.com/outcaste-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
-
-func TestTruncateVlogWithClose(t *testing.T) {
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%d%10d", i, i))
-	}
-	data := func(l int) []byte {
-		m := make([]byte, l)
-		_, err := rand.Read(m)
-		require.NoError(t, err)
-		return m
-	}
-
-	dir, err := ioutil.TempDir("", "badger-test")
-	require.NoError(t, err)
-	defer removeDir(dir)
-
-	opt := getTestOptions(dir)
-	opt.SyncWrites = true
-	opt.ValueThreshold = 1 // Force all reads from value log.
-
-	db, err := Open(opt)
-	require.NoError(t, err)
-
-	err = db.Update(func(txn *Txn) error {
-		return txn.SetEntry(NewEntry(key(0), data(4055)))
-	})
-	require.NoError(t, err)
-
-	// Close the DB.
-	require.NoError(t, db.Close())
-	// We start value logs at 1.
-	require.NoError(t, os.Truncate(filepath.Join(dir, "000001.vlog"), 4090))
-
-	// Reopen and write some new data.
-	db, err = Open(opt)
-	require.NoError(t, err)
-	for i := 0; i < 32; i++ {
-		err := db.Update(func(txn *Txn) error {
-			return txn.SetEntry(NewEntry(key(i), data(10)))
-		})
-		require.NoError(t, err)
-	}
-
-	// Read it back to ensure that we can read it now.
-	for i := 0; i < 32; i++ {
-		err := db.View(func(txn *Txn) error {
-			item, err := txn.Get(key(i))
-			require.NoError(t, err)
-			val := getItemValue(t, item)
-			require.Equal(t, 10, len(val))
-			return nil
-		})
-		require.NoError(t, err)
-	}
-	require.NoError(t, db.Close())
-
-	// Reopen and read the data again.
-	db, err = Open(opt)
-	require.NoError(t, err)
-	for i := 0; i < 32; i++ {
-		err := db.View(func(txn *Txn) error {
-			item, err := txn.Get(key(i))
-			require.NoError(t, err, "key: %s", key(i))
-			val := getItemValue(t, item)
-			require.Equal(t, 10, len(val))
-			return nil
-		})
-		require.NoError(t, err)
-	}
-	require.NoError(t, db.Close())
-}
 
 var manual = flag.Bool("manual", false, "Set when manually running some tests.")
 
@@ -225,8 +152,7 @@ func TestBigValues(t *testing.T) {
 		t.Skip("Skipping test meant to be run manually.")
 		return
 	}
-	opts := DefaultOptions("").
-		WithValueThreshold(1 << 20)
+	opts := DefaultOptions("")
 	test := func(t *testing.T, db *DB) {
 		keyCount := 1000
 
@@ -409,18 +335,13 @@ func TestReadSameVlog(t *testing.T) {
 	}
 
 	t.Run("Test Read Again Plain Text", func(t *testing.T) {
-		opt := getTestOptions("")
-		// Forcing to read from vlog
-		opt.ValueThreshold = 1
 		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 			testReadingSameKey(t, db)
 		})
-
 	})
 
 	t.Run("Test Read Again Encryption", func(t *testing.T) {
 		opt := getTestOptions("")
-		opt.ValueThreshold = 1
 		// Generate encryption key.
 		eKey := make([]byte, 32)
 		_, err := rand.Read(eKey)
