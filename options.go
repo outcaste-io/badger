@@ -67,6 +67,7 @@ type Options struct {
 	LevelSizeMultiplier int
 	TableSizeMultiplier int
 	MaxLevels           int
+	MaxValueSize        int64
 
 	VLogPercentile float64
 	ValueThreshold int64
@@ -185,6 +186,7 @@ func DefaultOptions(path string) Options {
 
 		VLogPercentile: 0.0,
 		ValueThreshold: maxValueThreshold,
+		MaxValueSize:   maxValueSize,
 
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
@@ -216,6 +218,7 @@ func buildTableOptions(db *DB) table.Options {
 
 const (
 	maxValueThreshold = (1 << 20) // 1 MB
+	maxValueSize      = (1 << 20) // 1 MB
 )
 
 // LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
@@ -495,6 +498,16 @@ func (opt Options) WithLevelSizeMultiplier(val int) Options {
 // The default value of MaxLevels is 7.
 func (opt Options) WithMaxLevels(val int) Options {
 	opt.MaxLevels = val
+	return opt
+}
+
+// WithMaxValueSize returns a new Options value with maxValueSize set to the given value.
+//
+// MaxValueSize sets the allowed size of values stored in badger.
+//
+// The default value of MaxValueSize is 1 MB.
+func (opt Options) WithMaxValueSize(val int64) Options {
+	opt.MaxValueSize = val
 	return opt
 }
 
