@@ -166,19 +166,6 @@ func checkAndSetOptions(opt *Options) error {
 		return errors.New("vlogPercentile must be within range of 0.0-1.0")
 	}
 
-	// We are limiting opt.ValueThreshold to maxValueThreshold for now.
-	if opt.ValueThreshold > maxValueThreshold {
-		return errors.Errorf("Invalid ValueThreshold, must be less or equal to %d",
-			maxValueThreshold)
-	}
-
-	// If ValueThreshold is greater than opt.maxBatchSize, we won't be able to push any data using
-	// the transaction APIs. Transaction batches entries into batches of size opt.maxBatchSize.
-	if opt.ValueThreshold > opt.maxBatchSize {
-		return errors.Errorf("Valuethreshold %d greater than max batch size of %d. Either "+
-			"reduce opt.ValueThreshold or increase opt.MaxTableSize.",
-			opt.ValueThreshold, opt.maxBatchSize)
-	}
 	if opt.ReadOnly {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
@@ -319,8 +306,6 @@ func Open(opt Options) (*DB, error) {
 
 	if db.opt.InMemory {
 		db.opt.SyncWrites = false
-		// If badger is running in memory mode, push everything into the LSM Tree.
-		db.opt.ValueThreshold = math.MaxInt32
 	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,

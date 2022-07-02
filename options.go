@@ -69,7 +69,6 @@ type Options struct {
 	MaxLevels           int
 
 	VLogPercentile float64
-	ValueThreshold int64
 	NumMemtables   int
 	// Changing BlockSize across DB runs will not break badger. The block size is
 	// read from the block index stored at the end of the table.
@@ -172,9 +171,6 @@ func DefaultOptions(path string) Options {
 		// Benchmark code can be found in table/builder_test.go file
 		ZSTDCompressionLevel: 1,
 
-		VLogPercentile: 0.0,
-		ValueThreshold: maxValueThreshold,
-
 		Logger:                        defaultLogger(INFO),
 		EncryptionKey:                 []byte{},
 		EncryptionKeyRotationDuration: 10 * 24 * time.Hour, // Default 10 days.
@@ -204,22 +200,9 @@ func buildTableOptions(db *DB) table.Options {
 }
 
 const (
+	// TODO: Increase this.
 	maxValueThreshold = (1 << 20) // 1 MB
 )
-
-// LSMOnlyOptions follows from DefaultOptions, but sets a higher ValueThreshold
-// so values would be collocated with the LSM tree, with value log largely acting
-// as a write-ahead log only. These options would reduce the disk usage of value
-// log, and make Badger act more like a typical LSM tree.
-func LSMOnlyOptions(path string) Options {
-	// Let's not set any other options, because they can cause issues with the
-	// size of key-value a user can pass to Badger.
-	//
-	// NOTE: If a user does not want to set 64KB as the ValueThreshold because
-	// of performance reasons, 1KB would be a good option too, allowing
-	// values smaller than 1KB to be collocated with the keys in the LSM tree.
-	return DefaultOptions(path).WithValueThreshold(maxValueThreshold /* 1 MB */)
-}
 
 // parseCompression returns badger.compressionType and compression level given compression string
 // of format compression-type:compression-level
@@ -480,17 +463,6 @@ func (opt Options) WithLevelSizeMultiplier(val int) Options {
 // The default value of MaxLevels is 7.
 func (opt Options) WithMaxLevels(val int) Options {
 	opt.MaxLevels = val
-	return opt
-}
-
-// WithValueThreshold returns a new Options value with ValueThreshold set to the given value.
-//
-// ValueThreshold sets the threshold used to decide whether a value is stored directly in the LSM
-// tree or separately in the log value files.
-//
-// The default value of ValueThreshold is 1 MB, but LSMOnlyOptions sets it to maxValueThreshold.
-func (opt Options) WithValueThreshold(val int64) Options {
-	opt.ValueThreshold = val
 	return opt
 }
 
