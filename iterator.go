@@ -157,7 +157,6 @@ func (item *Item) yieldItemValue() ([]byte, func(), error) {
 		item.slice = new(y.Slice)
 	}
 
-	y.AssertTrue(item.meta&bitValuePointerX == 0)
 	val := item.slice.Resize(len(item.vptr))
 	copy(val, item.vptr)
 	return val, nil, nil

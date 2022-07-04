@@ -46,10 +46,8 @@ import (
 // a key that has never been seen and a key that has been explicitly deleted.
 const (
 	bitDelete                 byte = 1 << 0 // Set if the key has been deleted.
-	bitValuePointerX          byte = 1 << 1 // Set if the value is NOT stored directly next to key.
 	BitDiscardEarlierVersions byte = 1 << 2 // Set if earlier versions can be discarded.
-	// Set if item shouldn't be discarded via compactions (used by merge operator)
-	bitMergeEntry byte = 1 << 3
+
 	// The MSB 2 bits are for transactions.
 	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
 	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
@@ -735,7 +733,7 @@ func (db *DB) writeToLSM(b *request) error {
 				// to be retrieved during iterator prefetch. `bitValuePointer` is only
 				// known to be set in write to LSM when the entry is loaded from a backup
 				// with lower ValueThreshold and its value was stored in the value log.
-				Meta:      entry.meta &^ bitValuePointerX,
+				Meta:      entry.meta,
 				UserMeta:  entry.UserMeta,
 				ExpiresAt: entry.ExpiresAt,
 			})

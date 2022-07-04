@@ -200,7 +200,7 @@ func buildTableOptions(db *DB) table.Options {
 }
 
 const (
-	// TODO: Increase this.
+	// TODO(mrjn): Increase this.
 	maxValueThreshold = (1 << 20) // 1 MB
 )
 
