@@ -31,13 +31,6 @@ type Entry struct {
 	offset    uint32 // offset is an internal field.
 	UserMeta  byte
 	meta      byte
-
-	// Fields maintained internally.
-	hlen int // Length of the header.
-}
-
-func (e *Entry) isZero() bool {
-	return len(e.Key) == 0
 }
 
 func (e *Entry) estimateSize() int64 {

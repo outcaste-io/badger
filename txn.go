@@ -47,7 +47,6 @@ type Txn struct {
 
 	numIterators int32
 	discarded    bool
-	doneRead     bool
 	update       bool // update is used to conditionally keep track of reads.
 }
 

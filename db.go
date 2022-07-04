@@ -51,12 +51,6 @@ const (
 	// The MSB 2 bits are for transactions.
 	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
 	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
-
-	// size of vlog header.
-	// +----------------+------------------+
-	// | keyID(8 bytes) |  baseIV(12 bytes)|
-	// +----------------+------------------+
-	vlogHeaderSize = 20
 )
 
 var (
@@ -115,9 +109,6 @@ type DB struct {
 
 	mt  *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm []*skl.Skiplist // Add here only AFTER pushing to flushChan.
-
-	// Initialized via openMemTables.
-	nextMemFid int
 
 	discardTs uint64
 	opt       Options
@@ -861,18 +852,6 @@ func (db *DB) doWrites(lc *z.Closer) {
 		reqs = make([]*request, 0, 10)
 		reqLen.Set(0)
 	}
-}
-
-// batchSet applies a list of badger.Entry. If a request level error occurs it
-// will be returned.
-//   Check(kv.BatchSet(entries))
-func (db *DB) batchSet(entries []*Entry) error {
-	req, err := db.sendToWriteCh(entries)
-	if err != nil {
-		return err
-	}
-
-	return req.Wait()
 }
 
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback

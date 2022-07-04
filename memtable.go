@@ -21,11 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/outcaste-io/badger/v3/skl"
-	"github.com/pkg/errors"
 )
-
-var errStop = errors.New("Stop iteration")
-var errTruncate = errors.New("Do truncate")
 
 type request struct {
 	// Input values
