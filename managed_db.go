@@ -24,7 +24,7 @@ import "sync/atomic"
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func OpenManaged(opts Options) (*DB, error) {
-	opts.managedTxns = true
+	// TODO(mrjn): This would be the default.
 	return Open(opts)
 }
 
@@ -34,9 +34,6 @@ func OpenManaged(opts Options) (*DB, error) {
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
-	if !db.opt.managedTxns {
-		panic("Cannot use NewTransactionAt with managedDB=false. Use NewTransaction instead.")
-	}
 	txn := db.newTransaction(update, true)
 	txn.readTs = readTs
 	return txn
@@ -45,20 +42,12 @@ func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
 // NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the commit timestamp.
 // NewWriteBatchAt is supposed to be used only in the managed mode.
 func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
-	if !db.opt.managedTxns {
-		panic("cannot use NewWriteBatchAt with managedDB=false. Use NewWriteBatch instead")
-	}
-
 	wb := db.newWriteBatch(true)
 	wb.commitTs = commitTs
 	wb.txn.commitTs = commitTs
 	return wb
 }
 func (db *DB) NewManagedWriteBatch() *WriteBatch {
-	if !db.opt.managedTxns {
-		panic("cannot use NewManagedWriteBatch with managedDB=false. Use NewWriteBatch instead")
-	}
-
 	wb := db.newWriteBatch(true)
 	return wb
 }
@@ -69,9 +58,6 @@ func (db *DB) NewManagedWriteBatch() *WriteBatch {
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
 func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
-	if !txn.db.opt.managedTxns {
-		panic("Cannot use CommitAt with managedDB=false. Use Commit instead.")
-	}
 	txn.commitTs = commitTs
 	if callback == nil {
 		return txn.Commit()
@@ -84,8 +70,5 @@ func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
 // versions can be discarded from the LSM tree, and thence from the value log to
 // reclaim disk space. Can only be used with managed transactions.
 func (db *DB) SetDiscardTs(ts uint64) {
-	if !db.opt.managedTxns {
-		panic("Cannot use SetDiscardTs with managedDB=false.")
-	}
 	atomic.StoreUint64(&db.discardTs, ts)
 }

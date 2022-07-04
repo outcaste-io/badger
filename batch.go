@@ -45,10 +45,7 @@ type WriteBatch struct {
 // creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
 // blind writes can never encounter transaction conflicts (ErrConflict).
 func (db *DB) NewWriteBatch() *WriteBatch {
-	if db.opt.managedTxns {
-		panic("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
-	}
-	return db.newWriteBatch(false)
+	panic("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
 }
 
 func (db *DB) newWriteBatch(isManaged bool) *WriteBatch {
@@ -134,9 +131,6 @@ func (wb *WriteBatch) WriteList(kvList *pb.KVList) error {
 // SetEntryAt is the equivalent of Txn.SetEntry but it also allows setting version for the entry.
 // SetEntryAt can be used only in managed mode.
 func (wb *WriteBatch) SetEntryAt(e *Entry, ts uint64) error {
-	if !wb.db.opt.managedTxns {
-		return errors.New("SetEntryAt can only be used in managed mode. Use SetEntry instead")
-	}
 	e.version = ts
 	return wb.SetEntry(e)
 }

@@ -449,7 +449,7 @@ func (st *Stream) copyTablesOver(ctx context.Context, tableMatrix [][]*table.Tab
 // return that error. Orchestrate can be called multiple times, but in serial order.
 func (st *Stream) Orchestrate(ctx context.Context) error {
 	if st.FullCopy {
-		if !st.db.opt.managedTxns || st.SinceTs != 0 || st.ChooseKey != nil && st.KeyToList != nil {
+		if st.SinceTs != 0 || st.ChooseKey != nil && st.KeyToList != nil {
 			panic("Got invalid stream options when doing full copy")
 		}
 	}
@@ -638,17 +638,11 @@ func (db *DB) newStream() *Stream {
 
 // NewStream creates a new Stream.
 func (db *DB) NewStream() *Stream {
-	if db.opt.managedTxns {
-		panic("This API can not be called in managed mode.")
-	}
-	return db.newStream()
+	panic("This API can not be called in managed mode.")
 }
 
 // NewStreamAt creates a new Stream at a particular timestamp. Should only be used with managed DB.
 func (db *DB) NewStreamAt(readTs uint64) *Stream {
-	if !db.opt.managedTxns {
-		panic("This API can only be called in managed mode.")
-	}
 	stream := db.newStream()
 	stream.readTs = readTs
 	return stream

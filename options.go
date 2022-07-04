@@ -115,11 +115,6 @@ type Options struct {
 	// with incompatible data format.
 	ExternalMagicVersion uint16
 
-	// Transaction start and commit timestamps are managed by end-user.
-	// This is only useful for databases built on top of Badger (like Dgraph).
-	// Not recommended for most users.
-	managedTxns bool
-
 	// 4. Flags for testing purposes
 	// ------------------------------
 	maxBatchCount int64 // max entries in batch

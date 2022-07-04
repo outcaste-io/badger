@@ -19,7 +19,6 @@ package badger
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"expvar"
 	"fmt"
 	"math"
@@ -940,10 +939,6 @@ func (db *DB) handoverSkiplist(r *handoverRequest) error {
 }
 
 func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
-	if !db.opt.managedTxns {
-		panic("Handover Skiplist is only available in managed mode.")
-	}
-
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return ErrBlockedWrites
 	}
@@ -1193,124 +1188,6 @@ func (db *DB) Size() (lsm, vlog int64) {
 	lsm = y.LSMSizeGet(db.opt.MetricsEnabled, db.opt.Dir).(*expvar.Int).Value()
 	vlog = y.VlogSizeGet(db.opt.MetricsEnabled, db.opt.ValueDir).(*expvar.Int).Value()
 	return
-}
-
-// Sequence represents a Badger sequence.
-type Sequence struct {
-	lock      sync.Mutex
-	db        *DB
-	key       []byte
-	next      uint64
-	leased    uint64
-	bandwidth uint64
-}
-
-// Next would return the next integer in the sequence, updating the lease by running a transaction
-// if needed.
-func (seq *Sequence) Next() (uint64, error) {
-	seq.lock.Lock()
-	defer seq.lock.Unlock()
-	if seq.next >= seq.leased {
-		if err := seq.updateLease(); err != nil {
-			return 0, err
-		}
-	}
-	val := seq.next
-	seq.next++
-	return val, nil
-}
-
-// Release the leased sequence to avoid wasted integers. This should be done right
-// before closing the associated DB. However it is valid to use the sequence after
-// it was released, causing a new lease with full bandwidth.
-func (seq *Sequence) Release() error {
-	seq.lock.Lock()
-	defer seq.lock.Unlock()
-	err := seq.db.Update(func(txn *Txn) error {
-		item, err := txn.Get(seq.key)
-		if err != nil {
-			return err
-		}
-
-		var num uint64
-		if err := item.Value(func(v []byte) error {
-			num = binary.BigEndian.Uint64(v)
-			return nil
-		}); err != nil {
-			return err
-		}
-
-		if num == seq.leased {
-			var buf [8]byte
-			binary.BigEndian.PutUint64(buf[:], seq.next)
-			return txn.SetEntry(NewEntry(seq.key, buf[:]))
-		}
-
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	seq.leased = seq.next
-	return nil
-}
-
-func (seq *Sequence) updateLease() error {
-	return seq.db.Update(func(txn *Txn) error {
-		item, err := txn.Get(seq.key)
-		switch {
-		case errors.Is(err, ErrKeyNotFound):
-			seq.next = 0
-		case err != nil:
-			return err
-		default:
-			var num uint64
-			if err := item.Value(func(v []byte) error {
-				num = binary.BigEndian.Uint64(v)
-				return nil
-			}); err != nil {
-				return err
-			}
-			seq.next = num
-		}
-
-		lease := seq.next + seq.bandwidth
-		var buf [8]byte
-		binary.BigEndian.PutUint64(buf[:], lease)
-		if err = txn.SetEntry(NewEntry(seq.key, buf[:])); err != nil {
-			return err
-		}
-		seq.leased = lease
-		return nil
-	})
-}
-
-// GetSequence would initiate a new sequence object, generating it from the stored lease, if
-// available, in the database. Sequence can be used to get a list of monotonically increasing
-// integers. Multiple sequences can be created by providing different keys. Bandwidth sets the
-// size of the lease, determining how many Next() requests can be served from memory.
-//
-// GetSequence is not supported on ManagedDB. Calling this would result in a panic.
-func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
-	if db.opt.managedTxns {
-		panic("Cannot use GetSequence with managedDB=true.")
-	}
-
-	switch {
-	case len(key) == 0:
-		return nil, ErrEmptyKey
-	case bandwidth == 0:
-		return nil, ErrZeroBandwidth
-	}
-	seq := &Sequence{
-		db:        db,
-		key:       key,
-		next:      0,
-		leased:    0,
-		bandwidth: bandwidth,
-	}
-	err := seq.updateLease()
-	return seq, err
 }
 
 // Tables gets the TableInfo objects from the level controller. If withKeysCount

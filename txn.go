@@ -342,7 +342,7 @@ func (txn *Txn) commitPrecheck() error {
 	// someone uses txn.Commit instead of txn.CommitAt in managed mode.  This
 	// should happen only in managed mode. In normal mode, keepTogether will
 	// always be true.
-	if keepTogether && txn.db.opt.managedTxns && txn.commitTs == 0 {
+	if keepTogether && txn.commitTs == 0 {
 		return errors.New("CommitTs cannot be zero. Please use commitAt instead")
 	}
 	return nil
@@ -476,6 +476,7 @@ func (txn *Txn) Discarded() bool {
 //  defer txn.Discard()
 //  // Call various APIs.
 func (db *DB) NewTransaction(update bool) *Txn {
+	panic("this shouldn't be used")
 	return db.newTransaction(update, false)
 }
 
@@ -507,12 +508,7 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 	if db.IsClosed() {
 		return ErrDBClosed
 	}
-	var txn *Txn
-	if db.opt.managedTxns {
-		txn = db.NewTransactionAt(math.MaxUint64, false)
-	} else {
-		txn = db.NewTransaction(false)
-	}
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	return fn(txn)
@@ -525,15 +521,5 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 	if db.IsClosed() {
 		return ErrDBClosed
 	}
-	if db.opt.managedTxns {
-		panic("Update can only be used with managedDB=false.")
-	}
-	txn := db.NewTransaction(true)
-	defer txn.Discard()
-
-	if err := fn(txn); err != nil {
-		return err
-	}
-
-	return txn.Commit()
+	panic("Update can only be used with managedDB=false.")
 }
