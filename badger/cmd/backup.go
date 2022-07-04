@@ -61,7 +61,7 @@ func doBackup(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	db, err := badger.Open(opt)
+	db, err := badger.OpenManaged(opt)
 	if err != nil {
 		return err
 	}

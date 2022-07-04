@@ -166,8 +166,12 @@ func checkAndSetOptions(opt *Options) error {
 	return nil
 }
 
-// Open returns a new DB object.
-func Open(opt Options) (*DB, error) {
+// OpenManaged returns a new DB, which allows more control over setting
+// transaction timestamps, aka managed mode.
+//
+// This is only useful for databases built on top of Badger (like Dgraph), and
+// can be ignored by most users.
+func OpenManaged(opt Options) (*DB, error) {
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}

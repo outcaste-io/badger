@@ -79,7 +79,7 @@ func flatten(cmd *cobra.Command, args []string) error {
 		WithCompression(options.CompressionType(fo.compressionType)).
 		WithEncryptionKey(encKey)
 	fmt.Printf("Opening badger with options = %+v\n", opt)
-	db, err := badger.Open(opt)
+	db, err := badger.OpenManaged(opt)
 	if err != nil {
 		return err
 	}

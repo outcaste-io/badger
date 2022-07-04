@@ -546,12 +546,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 		}
 	}
 
-	var txn *Txn
-	if st.readTs > 0 {
-		txn = st.db.NewTransactionAt(st.readTs, false)
-	} else {
-		txn = st.db.NewTransaction(false)
-	}
+	txn := st.db.NewTransactionAt(st.readTs, false)
 	defer txn.Discard()
 
 	newIterator := func(threadId int) *Iterator {

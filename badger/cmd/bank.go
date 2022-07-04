@@ -372,7 +372,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		log.Printf("Using encryption key %s\n", encryptionKey)
 	}
 	log.Printf("Opening DB with options: %+v\n", opts)
-	db, err := badger.Open(opts)
+	db, err := badger.OpenManaged(opts)
 	if err != nil {
 		return err
 	}
@@ -384,7 +384,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_subscribe")
 		y.Check(err)
 
-		subscribeDB, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
+		subscribeDB, err = badger.OpenManaged(badger.DefaultOptions(dir).WithSyncWrites(false))
 		if err != nil {
 			return err
 		}
@@ -395,7 +395,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 		dir, err := ioutil.TempDir("", "bank_stream")
 		y.Check(err)
 
-		tmpDb, err = badger.Open(badger.DefaultOptions(dir).WithSyncWrites(false))
+		tmpDb, err = badger.OpenManaged(badger.DefaultOptions(dir).WithSyncWrites(false))
 		if err != nil {
 			return err
 		}

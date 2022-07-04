@@ -18,27 +18,6 @@ package badger
 
 import "sync/atomic"
 
-// OpenManaged returns a new DB, which allows more control over setting
-// transaction timestamps, aka managed mode.
-//
-// This is only useful for databases built on top of Badger (like Dgraph), and
-// can be ignored by most users.
-func OpenManaged(opts Options) (*DB, error) {
-	// TODO(mrjn): This would be the default.
-	return Open(opts)
-}
-
-// NewTransactionAt follows the same logic as DB.NewTransaction(), but uses the
-// provided read timestamp.
-//
-// This is only useful for databases built on top of Badger (like Dgraph), and
-// can be ignored by most users.
-func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
-	txn := db.newTransaction(update, true)
-	txn.readTs = readTs
-	return txn
-}
-
 // NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the commit timestamp.
 // NewWriteBatchAt is supposed to be used only in the managed mode.
 func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {

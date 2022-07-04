@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,7 +113,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	db, err := badger.Open(bopt)
+	db, err := badger.OpenManaged(bopt)
 	if err != nil {
 		return y.Wrap(err, "failed to open database")
 	}
@@ -148,7 +149,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	if len(prefix) > 0 {
 		fmt.Printf("Only choosing keys with prefix: \n%s", hex.Dump(prefix))
 	}
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	iopt := badger.DefaultIteratorOptions
@@ -175,7 +176,7 @@ func showKeys(db *badger.DB, prefix []byte) error {
 }
 
 func lookup(db *badger.DB) error {
-	txn := db.NewTransaction(false)
+	txn := db.NewTransactionAt(math.MaxUint64, false)
 	defer txn.Discard()
 
 	key, err := hex.DecodeString(opt.keyLookup)

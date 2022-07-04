@@ -27,6 +27,7 @@ import (
 )
 
 // WriteBatch holds the necessary info to perform batched writes.
+// TODO(mrjn): Move this to use Skiplists directly. That's all we need.
 type WriteBatch struct {
 	sync.Mutex
 	txn      *Txn

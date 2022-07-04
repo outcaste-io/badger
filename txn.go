@@ -475,9 +475,16 @@ func (txn *Txn) Discarded() bool {
 //  txn := db.NewTransaction(false)
 //  defer txn.Discard()
 //  // Call various APIs.
-func (db *DB) NewTransaction(update bool) *Txn {
-	panic("this shouldn't be used")
-	return db.newTransaction(update, false)
+//
+// NewTransactionAt follows the same logic as DB.NewTransaction(), but uses the
+// provided read timestamp.
+//
+// This is only useful for databases built on top of Badger (like Dgraph), and
+// can be ignored by most users.
+func (db *DB) NewTransactionAt(readTs uint64, update bool) *Txn {
+	txn := db.newTransaction(update, true)
+	txn.readTs = readTs
+	return txn
 }
 
 func (db *DB) newTransaction(update, isManaged bool) *Txn {
