@@ -430,14 +430,11 @@ func (txn *Txn) NewIterator(opt IteratorOptions) *Iterator {
 
 	// TODO: If Prefix is set, only pick those memtables which have keys with
 	// the prefix.
-	tables, decr := txn.db.getMemTables()
+	mts, decr := txn.db.getMemTables()
 	defer decr()
 	var iters []y.Iterator
-	if itr := txn.newPendingWritesIterator(opt.Reverse); itr != nil {
-		iters = append(iters, itr)
-	}
-	for i := 0; i < len(tables); i++ {
-		iters = append(iters, tables[i].sl.NewUniIterator(opt.Reverse))
+	for i := 0; i < len(mts); i++ {
+		iters = append(iters, mts[i].NewUniIterator(opt.Reverse))
 	}
 	iters = append(iters, txn.db.lc.iterators(&opt)...) // This will increment references.
 	res := &Iterator{

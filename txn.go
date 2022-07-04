@@ -18,10 +18,8 @@ package badger
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"math"
-	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -30,220 +28,6 @@ import (
 	"github.com/outcaste-io/ristretto/z"
 	"github.com/pkg/errors"
 )
-
-type oracle struct {
-	isManaged       bool // Does not change value, so no locking required.
-	detectConflicts bool // Determines if the txns should be checked for conflicts.
-
-	sync.Mutex // For nextTxnTs and commits.
-	// writeChLock lock is for ensuring that transactions go to the write
-	// channel in the same order as their commit timestamps.
-	writeChLock sync.Mutex
-	nextTxnTs   uint64
-
-	// Used to block NewTransaction, so all previous commits are visible to a new read.
-	txnMark *y.WaterMark
-
-	// Either of these is used to determine which versions can be permanently
-	// discarded during compaction.
-	discardTs uint64       // Used by ManagedDB.
-	readMark  *y.WaterMark // Used by DB.
-
-	// committedTxns contains all committed writes (contains fingerprints
-	// of keys written and their latest commit counter).
-	committedTxns []committedTxn
-	lastCleanupTs uint64
-
-	// closer is used to stop watermarks.
-	closer *z.Closer
-}
-
-type committedTxn struct {
-	ts uint64
-	// ConflictKeys Keeps track of the entries written at timestamp ts.
-	conflictKeys map[uint64]struct{}
-}
-
-func newOracle(opt Options) *oracle {
-	orc := &oracle{
-		isManaged:       opt.managedTxns,
-		detectConflicts: opt.DetectConflicts,
-		// We're not initializing nextTxnTs and readOnlyTs. It would be done after replay in Open.
-		//
-		// WaterMarks must be 64-bit aligned for atomic package, hence we must use pointers here.
-		// See https://golang.org/pkg/sync/atomic/#pkg-note-BUG.
-		readMark: &y.WaterMark{Name: "badger.PendingReads"},
-		txnMark:  &y.WaterMark{Name: "badger.TxnTimestamp"},
-		closer:   z.NewCloser(2),
-	}
-	orc.readMark.Init(orc.closer)
-	orc.txnMark.Init(orc.closer)
-	return orc
-}
-
-func (o *oracle) Stop() {
-	o.closer.SignalAndWait()
-}
-
-func (o *oracle) readTs() uint64 {
-	if o.isManaged {
-		panic("ReadTs should not be retrieved for managed DB")
-	}
-
-	var readTs uint64
-	o.Lock()
-	readTs = o.nextTxnTs - 1
-	o.readMark.Begin(readTs)
-	o.Unlock()
-
-	// Wait for all txns which have no conflicts, have been assigned a commit
-	// timestamp and are going through the write to value log and LSM tree
-	// process. Not waiting here could mean that some txns which have been
-	// committed would not be read.
-	y.Check(o.txnMark.WaitForMark(context.Background(), readTs))
-	return readTs
-}
-
-func (o *oracle) nextTs() uint64 {
-	o.Lock()
-	defer o.Unlock()
-	return o.nextTxnTs
-}
-
-func (o *oracle) incrementNextTs() {
-	o.Lock()
-	defer o.Unlock()
-	o.nextTxnTs++
-}
-
-// Any deleted or invalid versions at or below ts would be discarded during
-// compaction to reclaim disk space in LSM tree and thence value log.
-func (o *oracle) setDiscardTs(ts uint64) {
-	o.Lock()
-	defer o.Unlock()
-	o.discardTs = ts
-	o.cleanupCommittedTransactions()
-}
-
-func (o *oracle) discardAtOrBelow() uint64 {
-	if o.isManaged {
-		o.Lock()
-		defer o.Unlock()
-		return o.discardTs
-	}
-	return o.readMark.DoneUntil()
-}
-
-// hasConflict must be called while having a lock.
-func (o *oracle) hasConflict(txn *Txn) bool {
-	if len(txn.reads) == 0 {
-		return false
-	}
-	for _, committedTxn := range o.committedTxns {
-		// If the committedTxn.ts is less than txn.readTs that implies that the
-		// committedTxn finished before the current transaction started.
-		// We don't need to check for conflict in that case.
-		// This change assumes linearizability. Lack of linearizability could
-		// cause the read ts of a new txn to be lower than the commit ts of
-		// a txn before it (@mrjn).
-		if committedTxn.ts <= txn.readTs {
-			continue
-		}
-
-		for _, ro := range txn.reads {
-			if _, has := committedTxn.conflictKeys[ro]; has {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func (o *oracle) newCommitTs(txn *Txn) (uint64, bool) {
-	o.Lock()
-	defer o.Unlock()
-
-	if o.hasConflict(txn) {
-		return 0, true
-	}
-
-	var ts uint64
-	if !o.isManaged {
-		o.doneRead(txn)
-		o.cleanupCommittedTransactions()
-
-		// This is the general case, when user doesn't specify the read and commit ts.
-		ts = o.nextTxnTs
-		o.nextTxnTs++
-		o.txnMark.Begin(ts)
-
-	} else {
-		// If commitTs is set, use it instead.
-		ts = txn.commitTs
-	}
-
-	y.AssertTrue(ts >= o.lastCleanupTs)
-
-	if o.detectConflicts {
-		// We should ensure that txns are not added to o.committedTxns slice when
-		// conflict detection is disabled otherwise this slice would keep growing.
-		o.committedTxns = append(o.committedTxns, committedTxn{
-			ts:           ts,
-			conflictKeys: txn.conflictKeys,
-		})
-	}
-
-	return ts, false
-}
-
-func (o *oracle) doneRead(txn *Txn) {
-	if !txn.doneRead {
-		txn.doneRead = true
-		o.readMark.Done(txn.readTs)
-	}
-}
-
-func (o *oracle) cleanupCommittedTransactions() { // Must be called under o.Lock
-	if !o.detectConflicts {
-		// When detectConflicts is set to false, we do not store any
-		// committedTxns and so there's nothing to clean up.
-		return
-	}
-	// Same logic as discardAtOrBelow but unlocked
-	var maxReadTs uint64
-	if o.isManaged {
-		maxReadTs = o.discardTs
-	} else {
-		maxReadTs = o.readMark.DoneUntil()
-	}
-
-	y.AssertTrue(maxReadTs >= o.lastCleanupTs)
-
-	// do not run clean up if the maxReadTs (read timestamp of the
-	// oldest transaction that is still in flight) has not increased
-	if maxReadTs == o.lastCleanupTs {
-		return
-	}
-	o.lastCleanupTs = maxReadTs
-
-	tmp := o.committedTxns[:0]
-	for _, txn := range o.committedTxns {
-		if txn.ts <= maxReadTs {
-			continue
-		}
-		tmp = append(tmp, txn)
-	}
-	o.committedTxns = tmp
-}
-
-func (o *oracle) doneCommit(cts uint64) {
-	if o.isManaged {
-		// No need to update anything.
-		return
-	}
-	o.txnMark.Done(cts)
-}
 
 // Txn represents a Badger transaction.
 type Txn struct {
@@ -265,81 +49,6 @@ type Txn struct {
 	discarded    bool
 	doneRead     bool
 	update       bool // update is used to conditionally keep track of reads.
-}
-
-type pendingWritesIterator struct {
-	entries  []*Entry
-	nextIdx  int
-	readTs   uint64
-	reversed bool
-}
-
-func (pi *pendingWritesIterator) Next() {
-	pi.nextIdx++
-}
-
-func (pi *pendingWritesIterator) Rewind() {
-	pi.nextIdx = 0
-}
-
-func (pi *pendingWritesIterator) Seek(key []byte) {
-	key = y.ParseKey(key)
-	pi.nextIdx = sort.Search(len(pi.entries), func(idx int) bool {
-		cmp := bytes.Compare(pi.entries[idx].Key, key)
-		if !pi.reversed {
-			return cmp >= 0
-		}
-		return cmp <= 0
-	})
-}
-
-func (pi *pendingWritesIterator) Key() []byte {
-	y.AssertTrue(pi.Valid())
-	entry := pi.entries[pi.nextIdx]
-	return y.KeyWithTs(entry.Key, pi.readTs)
-}
-
-func (pi *pendingWritesIterator) Value() y.ValueStruct {
-	y.AssertTrue(pi.Valid())
-	entry := pi.entries[pi.nextIdx]
-	return y.ValueStruct{
-		Value:     entry.Value,
-		Meta:      entry.meta,
-		UserMeta:  entry.UserMeta,
-		ExpiresAt: entry.ExpiresAt,
-		Version:   pi.readTs,
-	}
-}
-
-func (pi *pendingWritesIterator) Valid() bool {
-	return pi.nextIdx < len(pi.entries)
-}
-
-func (pi *pendingWritesIterator) Close() error {
-	return nil
-}
-
-func (txn *Txn) newPendingWritesIterator(reversed bool) *pendingWritesIterator {
-	if !txn.update || len(txn.pendingWrites) == 0 {
-		return nil
-	}
-	entries := make([]*Entry, 0, len(txn.pendingWrites))
-	for _, e := range txn.pendingWrites {
-		entries = append(entries, e)
-	}
-	// Number of pending writes per transaction shouldn't be too big in general.
-	sort.Slice(entries, func(i, j int) bool {
-		cmp := bytes.Compare(entries[i].Key, entries[j].Key)
-		if !reversed {
-			return cmp < 0
-		}
-		return cmp > 0
-	})
-	return &pendingWritesIterator{
-		readTs:   txn.readTs,
-		entries:  entries,
-		reversed: reversed,
-	}
 }
 
 func (txn *Txn) checkSize(e *Entry) error {
@@ -541,24 +250,10 @@ func (txn *Txn) Discard() {
 		panic("Unclosed iterator at time of Txn.Discard.")
 	}
 	txn.discarded = true
-	if !txn.db.orc.isManaged {
-		txn.db.orc.doneRead(txn)
-	}
 }
 
 func (txn *Txn) commitAndSend() (func() error, error) {
-	orc := txn.db.orc
-	// Ensure that the order in which we get the commit timestamp is the same as
-	// the order in which we push these updates to the write channel. So, we
-	// acquire a writeChLock before getting a commit timestamp, and only release
-	// it after pushing the entries to it.
-	orc.writeChLock.Lock()
-	defer orc.writeChLock.Unlock()
-
-	commitTs, conflict := orc.newCommitTs(txn)
-	if conflict {
-		return nil, ErrConflict
-	}
+	commitTs := txn.commitTs
 
 	keepTogether := true
 	setVersion := func(e *Entry) {
@@ -620,7 +315,6 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 
 	req, err := txn.db.sendToWriteCh(entries)
 	if err != nil {
-		orc.doneCommit(commitTs)
 		return nil, err
 	}
 	ret := func() error {
@@ -628,7 +322,6 @@ func (txn *Txn) commitAndSend() (func() error, error) {
 		// Wait before marking commitTs as done.
 		// We can't defer doneCommit above, because it is being called from a
 		// callback here.
-		orc.doneCommit(commitTs)
 		return err
 	}
 	return ret, nil
@@ -804,9 +497,6 @@ func (db *DB) newTransaction(update, isManaged bool) *Txn {
 			txn.conflictKeys = make(map[uint64]struct{})
 		}
 		txn.pendingWrites = make(map[string]*Entry)
-	}
-	if !isManaged {
-		txn.readTs = db.orc.readTs()
 	}
 	return txn
 }

@@ -557,7 +557,7 @@ func (st *Stream) Orchestrate(ctx context.Context) error {
 	newIterator := func(threadId int) *Iterator {
 		var itrs []y.Iterator
 		for _, mt := range memTables {
-			itrs = append(itrs, mt.sl.NewUniIterator(false))
+			itrs = append(itrs, mt.NewUniIterator(false))
 		}
 		if tables := tableMatrix[0]; len(tables) > 0 {
 			itrs = append(itrs, iteratorsReversed(tables, 0)...)

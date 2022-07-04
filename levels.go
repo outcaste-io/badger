@@ -639,7 +639,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 	// Pick a discard ts, so we can discard versions below this ts. We should
 	// never discard any versions starting from above this timestamp, because
 	// that would affect the snapshot view guarantee provided by transactions.
-	discardTs := s.kv.orc.discardAtOrBelow()
+	discardTs := s.kv.discardAtOrBelow()
 
 	// exceedsAllowedOverlap returns true if the given key range would overlap with more than 10
 	// tables from level below nextLevel (nextLevel+1). This helps avoid generating tables at Li
@@ -1278,7 +1278,7 @@ func (s *levelsController) fillMaxLevelTables(tables []*table.Table, cd *compact
 	for _, t := range sortedTables {
 		// If the maxVersion is above the discardTs, we won't clean anything in
 		// the compaction. So skip this table.
-		if t.MaxVersion() > s.kv.orc.discardAtOrBelow() {
+		if t.MaxVersion() > s.kv.discardAtOrBelow() {
 			continue
 		}
 		if now.Sub(t.CreatedAt) < time.Hour {

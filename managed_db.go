@@ -16,6 +16,8 @@
 
 package badger
 
+import "sync/atomic"
+
 // OpenManaged returns a new DB, which allows more control over setting
 // transaction timestamps, aka managed mode.
 //
@@ -85,5 +87,5 @@ func (db *DB) SetDiscardTs(ts uint64) {
 	if !db.opt.managedTxns {
 		panic("Cannot use SetDiscardTs with managedDB=false.")
 	}
-	db.orc.setDiscardTs(ts)
+	atomic.StoreUint64(&db.discardTs, ts)
 }

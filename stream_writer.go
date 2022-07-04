@@ -317,17 +317,6 @@ func (sw *StreamWriter) Flush() error {
 		}
 	}
 
-	if !sw.db.opt.managedTxns {
-		if sw.db.orc != nil {
-			sw.db.orc.Stop()
-		}
-		sw.db.orc = newOracle(sw.db.opt)
-		sw.db.orc.nextTxnTs = sw.maxVersion
-		sw.db.orc.txnMark.Done(sw.maxVersion)
-		sw.db.orc.readMark.Done(sw.maxVersion)
-		sw.db.orc.incrementNextTs()
-	}
-
 	// Wait for all files to be written.
 	if err := sw.throttle.Finish(); err != nil {
 		return err

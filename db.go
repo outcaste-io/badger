@@ -113,12 +113,13 @@ type DB struct {
 
 	closers closers
 
-	mt  *memTable   // Our latest (actively written) in-memory table
-	imm []*memTable // Add here only AFTER pushing to flushChan.
+	mt  *skl.Skiplist   // Our latest (actively written) in-memory table
+	imm []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 
 	// Initialized via openMemTables.
 	nextMemFid int
 
+	discardTs uint64
 	opt       Options
 	manifest  *manifestFile
 	lc        *levelsController
@@ -130,7 +131,6 @@ type DB struct {
 	blockWrites int32
 	isClosed    uint32
 
-	orc              *oracle
 	bannedNamespaces *lockedKeys
 
 	pub        *publisher
@@ -234,7 +234,7 @@ func Open(opt Options) (*DB, error) {
 	}()
 
 	db := &DB{
-		imm:              make([]*memTable, 0, opt.NumMemtables),
+		imm:              make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:        make(chan flushTask, opt.NumMemtables),
 		writeCh:          make(chan *request, kvWriteChCapacity),
 		sklCh:            make(chan *handoverRequest),
@@ -242,7 +242,6 @@ func Open(opt Options) (*DB, error) {
 		manifest:         manifestFile,
 		dirLockGuard:     dirLockGuard,
 		valueDirGuard:    valueDirLockGuard,
-		orc:              newOracle(opt),
 		pub:              newPublisher(),
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
@@ -320,14 +319,8 @@ func Open(opt Options) (*DB, error) {
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
 
-	if err := db.openMemTables(db.opt); err != nil {
-		return nil, y.Wrapf(err, "while opening memtables")
-	}
-
 	if !db.opt.ReadOnly {
-		if db.mt, err = db.newMemTable(); err != nil {
-			return nil, y.Wrapf(err, "cannot create memtable")
-		}
+		db.mt = skl.NewSkiplist(arenaSize(db.opt))
 	}
 
 	// newLevelsController potentially loads files in directory.
@@ -345,20 +338,9 @@ func Open(opt Options) (*DB, error) {
 		}()
 		// Flush them to disk asap.
 		for _, mt := range db.imm {
-			db.flushChan <- flushTask{mt: mt}
+			db.flushChan <- flushTask{sl: mt}
 		}
 	}
-	// We do increment nextTxnTs below. So, no need to do it here.
-	db.orc.nextTxnTs = db.MaxVersion()
-	db.opt.Infof("Set nextTxnTs to %d", db.orc.nextTxnTs)
-
-	// Let's advance nextTxnTs to one more than whatever we observed via
-	// replaying the logs.
-	db.orc.txnMark.Done(db.orc.nextTxnTs)
-	// In normal mode, we must update readMark so older versions of keys can be removed during
-	// compaction when run in offline mode via the flatten tool.
-	db.orc.readMark.Done(db.orc.nextTxnTs)
-	db.orc.incrementNextTs()
 
 	if err := db.initBannedNamespaces(); err != nil {
 		return db, errors.Wrapf(err, "While setting banned keys")
@@ -375,6 +357,10 @@ func Open(opt Options) (*DB, error) {
 	dirLockGuard = nil
 	manifestFile = nil
 	return db, nil
+}
+
+func (db *DB) discardAtOrBelow() uint64 {
+	return atomic.LoadUint64(&db.discardTs)
 }
 
 // initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.
@@ -404,15 +390,6 @@ func (db *DB) MaxVersion() uint64 {
 			maxVersion = a
 		}
 	}
-	db.lock.Lock()
-	// In read only mode, we do not create new mem table.
-	if !db.opt.ReadOnly {
-		update(db.mt.maxVersion)
-	}
-	for _, mt := range db.imm {
-		update(mt.maxVersion)
-	}
-	db.lock.Unlock()
 	for _, ti := range db.Tables() {
 		update(ti.MaxVersion)
 	}
@@ -472,11 +449,6 @@ func (db *DB) cleanup() {
 	if db.closers.pub != nil {
 		db.closers.pub.Signal()
 	}
-
-	db.orc.Stop()
-
-	// Do not use vlog.Close() here. vlog.Close truncates the files. We don't
-	// want to truncate files unless the user has specified the truncate flag.
 }
 
 // BlockCacheMetrics returns the metrics for the underlying block cache.
@@ -535,7 +507,7 @@ func (db *DB) close() (err error) {
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
 	if db.mt != nil {
-		if db.mt.sl.Empty() {
+		if db.mt.Empty() {
 			// Remove the memtable if empty.
 			db.mt.DecrRef()
 		} else {
@@ -546,7 +518,7 @@ func (db *DB) close() (err error) {
 					defer db.lock.Unlock()
 					y.AssertTrue(db.mt != nil)
 					select {
-					case db.flushChan <- flushTask{mt: db.mt}:
+					case db.flushChan <- flushTask{sl: db.mt}:
 						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
 						db.mt = nil                    // Will segfault if we try writing!
 						db.opt.Debugf("pushed to flush chan\n")
@@ -590,7 +562,6 @@ func (db *DB) close() (err error) {
 	}
 	db.opt.Debugf("Waiting for closer")
 	db.closers.updateSize.SignalAndWait()
-	db.orc.Stop()
 	db.blockCache.Close()
 	db.indexCache.Close()
 
@@ -647,11 +618,11 @@ func (db *DB) Sync() error {
 }
 
 // getMemtables returns the current memtables and get references.
-func (db *DB) getMemTables() ([]*memTable, func()) {
+func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
 
-	var tables []*memTable
+	var tables []*skl.Skiplist
 
 	// Mutable memtable does not exist in read-only mode.
 	if !db.opt.ReadOnly {
@@ -699,7 +670,7 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 
 	y.NumGetsAdd(db.opt.MetricsEnabled, 1)
 	for i := 0; i < len(tables); i++ {
-		vs := tables[i].sl.Get(key)
+		vs := tables[i].Get(key)
 		y.NumMemtableGetsAdd(db.opt.MetricsEnabled, 1)
 		if vs.Meta == 0 && vs.Value == nil {
 			continue
@@ -726,7 +697,7 @@ func (db *DB) writeToLSM(b *request) error {
 	defer db.lock.RUnlock()
 	for _, entry := range b.Entries {
 		// Will include deletion / tombstone case.
-		err := db.mt.Put(entry.Key,
+		db.mt.Put(entry.Key,
 			y.ValueStruct{
 				Value: entry.Value,
 				// Ensure value pointer flag is removed. Otherwise, the value will fail
@@ -737,12 +708,6 @@ func (db *DB) writeToLSM(b *request) error {
 				UserMeta:  entry.UserMeta,
 				ExpiresAt: entry.ExpiresAt,
 			})
-		if err != nil {
-			return y.Wrapf(err, "while writing to memTable")
-		}
-	}
-	if db.opt.SyncWrites {
-		return db.mt.SyncWAL()
 	}
 	return nil
 }
@@ -938,17 +903,17 @@ func (db *DB) ensureRoomForWrite() error {
 	defer db.lock.Unlock()
 
 	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
-	if !db.mt.isFull() {
+	if db.mt.MemSize() < db.opt.MemTableSize {
 		return nil
 	}
 
 	select {
-	case db.flushChan <- flushTask{mt: db.mt}:
+	case db.flushChan <- flushTask{sl: db.mt}:
 		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			db.mt.sl.MemSize(), len(db.flushChan))
+			db.mt.MemSize(), len(db.flushChan))
 		// We manage to push this task. Let's modify imm.
 		db.imm = append(db.imm, db.mt)
-		db.mt, err = db.newMemTable()
+		db.mt = skl.NewSkiplist(arenaSize(db.opt))
 		if err != nil {
 			return y.Wrapf(err, "cannot create new mem table")
 		}
@@ -961,17 +926,17 @@ func (db *DB) ensureRoomForWrite() error {
 }
 
 func (db *DB) handoverSkiplist(r *handoverRequest) error {
-	skl, callback := r.skl, r.callback
+	sl, callback := r.skl, r.callback
 	// If we have some data in db.mt, we should push that first, so the ordering of writes is
 	// maintained.
-	if !db.mt.sl.Empty() {
-		sz := db.mt.sl.MemSize()
+	if !db.mt.Empty() {
+		sz := db.mt.MemSize()
 		db.opt.Infof("Handover found %d B data in current memtable. Pushing to flushChan.", sz)
 		var err error
 		select {
-		case db.flushChan <- flushTask{mt: db.mt}:
+		case db.flushChan <- flushTask{sl: db.mt}:
 			db.imm = append(db.imm, db.mt)
-			db.mt, err = db.newMemTable()
+			db.mt = skl.NewSkiplist(arenaSize(db.opt))
 			if err != nil {
 				return y.Wrapf(err, "cannot push current memtable")
 			}
@@ -980,17 +945,15 @@ func (db *DB) handoverSkiplist(r *handoverRequest) error {
 		}
 	}
 
-	mt := &memTable{sl: skl}
-
 	req := &request{
-		Skl: skl,
+		Skl: sl,
 	}
 	reqs := []*request{req}
 	db.pub.sendUpdates(reqs)
 
 	select {
-	case db.flushChan <- flushTask{mt: mt, cb: callback}:
-		db.imm = append(db.imm, mt)
+	case db.flushChan <- flushTask{sl: sl, cb: callback}:
+		db.imm = append(db.imm, sl)
 		return nil
 	default:
 		return errNoRoom
@@ -1030,7 +993,7 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 	if ft.itr != nil {
 		iter = ft.itr
 	} else {
-		iter = ft.mt.sl.NewUniIterator(false)
+		iter = ft.sl.NewUniIterator(false)
 	}
 	defer iter.Close()
 
@@ -1045,7 +1008,7 @@ func buildL0Table(ft flushTask, bopts table.Options) *table.Builder {
 }
 
 type flushTask struct {
-	mt           *memTable
+	sl           *skl.Skiplist
 	cb           func()
 	itr          y.Iterator
 	dropPrefixes [][]byte
@@ -1091,18 +1054,18 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 
 	var sz int64
 	var itrs []y.Iterator
-	var mts []*memTable
+	var mts []*skl.Skiplist
 	var cbs []func()
 	slurp := func() {
 		for {
 			select {
 			case more := <-db.flushChan:
-				if more.mt == nil {
+				if more.sl == nil {
 					return
 				}
-				sl := more.mt.sl
+				sl := more.sl
 				itrs = append(itrs, sl.NewUniIterator(false))
-				mts = append(mts, more.mt)
+				mts = append(mts, more.sl)
 				cbs = append(cbs, more.cb)
 
 				sz += sl.MemSize()
@@ -1116,22 +1079,22 @@ func (db *DB) flushMemtable(lc *z.Closer) error {
 	}
 
 	for ft := range db.flushChan {
-		if ft.mt == nil {
+		if ft.sl == nil {
 			// We close db.flushChan now, instead of sending a nil ft.mt.
 			continue
 		}
-		sz = ft.mt.sl.MemSize()
+		sz = ft.sl.MemSize()
 		// Reset of itrs, mts etc. is being done below.
 		y.AssertTrue(len(itrs) == 0 && len(mts) == 0 && len(cbs) == 0)
-		itrs = append(itrs, ft.mt.sl.NewUniIterator(false))
-		mts = append(mts, ft.mt)
+		itrs = append(itrs, ft.sl.NewUniIterator(false))
+		mts = append(mts, ft.sl)
 		cbs = append(cbs, ft.cb)
 
 		// Pick more memtables, so we can really fill up the L0 table.
 		slurp()
 
 		// db.opt.Infof("Picked %d memtables. Size: %d\n", len(itrs), sz)
-		ft.mt = nil
+		ft.sl = nil
 		ft.itr = table.NewMergeIterator(itrs, false)
 		ft.cb = nil
 
@@ -1431,12 +1394,12 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 	// If the number of splits is still < 32, then look at the memtables.
 	if len(splits) < 32 {
 		maxPerSplit := 10000
-		mtSplits := func(mt *memTable) {
-			if mt == nil {
+		mtSplits := func(sl *skl.Skiplist) {
+			if sl == nil {
 				return
 			}
 			count := 0
-			iter := mt.sl.NewIterator()
+			iter := sl.NewIterator()
 			for iter.SeekToFirst(); iter.Valid(); iter.Next() {
 				if count%maxPerSplit == 0 {
 					// Add a split every maxPerSplit keys.
@@ -1451,7 +1414,7 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 
 		db.lock.Lock()
 		defer db.lock.Unlock()
-		var memTables []*memTable
+		var memTables []*skl.Skiplist
 		memTables = append(memTables, db.imm...)
 		for _, mt := range memTables {
 			mtSplits(mt)
@@ -1731,10 +1694,7 @@ func (db *DB) dropAll() (func(), error) {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt, err = db.newMemTable() // Set it up for future writes.
-	if err != nil {
-		return resume, y.Wrapf(err, "cannot open new memtable")
-	}
+	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 
 	num, err := db.lc.dropTree()
 	if err != nil {
@@ -1902,13 +1862,13 @@ func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 	defer db.lock.Unlock()
 
 	db.imm = append(db.imm, db.mt)
-	for _, memtable := range db.imm {
-		if memtable.sl.Empty() {
-			memtable.DecrRef()
+	for _, sl := range db.imm {
+		if sl.Empty() {
+			sl.DecrRef()
 			continue
 		}
 		task := flushTask{
-			mt: memtable,
+			sl: sl,
 			// Ensure that the head of value log gets persisted to disk.
 			dropPrefixes: filtered,
 		}
@@ -1917,12 +1877,12 @@ func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 			db.opt.Errorf("While trying to flush memtable: %v", err)
 			return err
 		}
-		memtable.DecrRef()
+		sl.DecrRef()
 	}
 	db.stopCompactions()
 	defer db.startCompactions()
 	db.imm = db.imm[:0]
-	db.mt, err = db.newMemTable()
+	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 	if err != nil {
 		return y.Wrapf(err, "cannot create new mem table")
 	}
