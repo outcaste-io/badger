@@ -85,7 +85,7 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	if vs.Value == nil && vs.Meta == 0 {
 		return nil, ErrKeyNotFound
 	}
-	if isDeletedOrExpired(vs.Meta, vs.ExpiresAt) {
+	if isDeletedOrExpired(vs.Meta) {
 		return nil, ErrKeyNotFound
 	}
 
@@ -95,7 +95,6 @@ func (txn *Txn) Get(key []byte) (item *Item, rerr error) {
 	item.userMeta = vs.UserMeta
 	item.vptr = y.SafeCopy(item.vptr, vs.Value)
 	item.txn = txn
-	item.expiresAt = vs.ExpiresAt
 	return item, nil
 }
 

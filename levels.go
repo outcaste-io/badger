@@ -724,7 +724,7 @@ func (s *levelsController) subcompact(it y.Iterator, kr keyRange, cd compactDef,
 			vs := it.Value()
 			version := y.ParseTs(it.Key())
 
-			isExpired := isDeletedOrExpired(vs.Meta, vs.ExpiresAt)
+			isExpired := isDeletedOrExpired(vs.Meta)
 
 			// Do not discard entries inserted by merge operator. These entries will be
 			// discarded once they're merged

@@ -18,19 +18,17 @@ package badger
 
 import (
 	"fmt"
-	"time"
 )
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
 // the user to set data.
 type Entry struct {
-	Key       []byte
-	Value     []byte
-	ExpiresAt uint64 // time.Unix
-	version   uint64
-	offset    uint32 // offset is an internal field.
-	UserMeta  byte
-	meta      byte
+	Key      []byte
+	Value    []byte
+	version  uint64
+	offset   uint32 // offset is an internal field.
+	UserMeta byte
+	meta     byte
 }
 
 func (e *Entry) estimateSize() int64 {
@@ -72,12 +70,5 @@ func (e *Entry) WithMeta(meta byte) *Entry {
 // method to indicate that all the older versions can be discarded and removed during compactions.
 func (e *Entry) WithDiscard() *Entry {
 	e.meta = BitDiscardEarlierVersions
-	return e
-}
-
-// WithTTL adds time to live duration to Entry e. Entry stored with a TTL would automatically expire
-// after the time has elapsed, and will be eligible for garbage collection.
-func (e *Entry) WithTTL(dur time.Duration) *Entry {
-	e.ExpiresAt = uint64(time.Now().Add(dur).Unix())
 	return e
 }

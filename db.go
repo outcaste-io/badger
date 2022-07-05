@@ -698,9 +698,8 @@ func (db *DB) writeToLSM(b *request) error {
 				// to be retrieved during iterator prefetch. `bitValuePointer` is only
 				// known to be set in write to LSM when the entry is loaded from a backup
 				// with lower ValueThreshold and its value was stored in the value log.
-				Meta:      entry.meta,
-				UserMeta:  entry.UserMeta,
-				ExpiresAt: entry.ExpiresAt,
+				Meta:     entry.meta,
+				UserMeta: entry.UserMeta,
 			})
 	}
 	return nil

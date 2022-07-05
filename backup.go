@@ -93,12 +93,11 @@ func (stream *Stream) Backup(w io.Writer, since uint64) (uint64, error) {
 			meta := item.meta &^ (bitTxn | bitFinTxn)
 			kv := y.NewKV(a)
 			*kv = pb.KV{
-				Key:       a.Copy(item.Key()),
-				Value:     valCopy,
-				UserMeta:  a.Copy([]byte{item.UserMeta()}),
-				Version:   item.Version(),
-				ExpiresAt: item.ExpiresAt(),
-				Meta:      a.Copy([]byte{meta}),
+				Key:      a.Copy(item.Key()),
+				Value:    valCopy,
+				UserMeta: a.Copy([]byte{item.UserMeta()}),
+				Version:  item.Version(),
+				Meta:     a.Copy([]byte{meta}),
 			}
 			list.Kv = append(list.Kv, kv)
 
@@ -186,11 +185,10 @@ func (l *KVLoader) Set(kv *pb.KV) error {
 		meta = kv.Meta[0]
 	}
 	e := &Entry{
-		Key:       y.KeyWithTs(kv.Key, kv.Version),
-		Value:     kv.Value,
-		UserMeta:  userMeta,
-		ExpiresAt: kv.ExpiresAt,
-		meta:      meta,
+		Key:      y.KeyWithTs(kv.Key, kv.Version),
+		Value:    kv.Value,
+		UserMeta: userMeta,
+		meta:     meta,
 	}
 	estimatedSize := e.estimateSize()
 	// Flush entries if inserting the next entry would overflow the transactional limits.
