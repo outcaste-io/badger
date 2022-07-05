@@ -150,10 +150,6 @@ func checkAndSetOptions(opt *Options) error {
 
 	// This is the maximum value, vlogThreshold can have if dynamic thresholding is enabled.
 	opt.maxValueThreshold = math.Min(maxValueThreshold, float64(opt.maxBatchSize))
-	if opt.VLogPercentile < 0.0 || opt.VLogPercentile > 1.0 {
-		return errors.New("vlogPercentile must be within range of 0.0-1.0")
-	}
-
 	if opt.ReadOnly {
 		// Do not perform compaction in read only mode.
 		opt.CompactL0OnClose = false
@@ -295,9 +291,6 @@ func OpenManaged(opt Options) (*DB, error) {
 	db.closers.cacheHealth = z.NewCloser(1)
 	go db.monitorCache(db.closers.cacheHealth)
 
-	if db.opt.InMemory {
-		db.opt.SyncWrites = false
-	}
 	krOpt := KeyRegistryOptions{
 		ReadOnly:                      opt.ReadOnly,
 		Dir:                           opt.Dir,
@@ -605,11 +598,8 @@ const (
 	lockFile = "LOCK"
 )
 
-// Sync syncs database content to disk. This function provides
-// more control to user to sync data whenever required.
-func (db *DB) Sync() error {
-	return nil
-}
+// Sync is a NOOP. SSTables are always synced to disk.
+func (db *DB) Sync() error { return nil }
 
 // getMemtables returns the current memtables and get references.
 func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
