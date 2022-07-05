@@ -326,12 +326,6 @@ func (sw *StreamWriter) Flush() error {
 		l.sortTables()
 	}
 
-	// Now sync the directories, so all the files are registered.
-	if sw.db.opt.ValueDir != sw.db.opt.Dir {
-		if err := sw.db.syncDir(sw.db.opt.ValueDir); err != nil {
-			return err
-		}
-	}
 	if err := sw.db.syncDir(sw.db.opt.Dir); err != nil {
 		return err
 	}

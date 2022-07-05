@@ -15,12 +15,3 @@
  */
 
 package badger
-
-import "sync/atomic"
-
-// SetDiscardTs sets a timestamp at or below which, any invalid or deleted
-// versions can be discarded from the LSM tree, and thence from the value log to
-// reclaim disk space. Can only be used with managed transactions.
-func (db *DB) SetDiscardTs(ts uint64) {
-	atomic.StoreUint64(&db.discardTs, ts)
-}

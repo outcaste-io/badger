@@ -26,22 +26,13 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Txn represents a Badger transaction.
-type Txn struct {
-	readTs uint64
-	db     *DB
-
-	numIterators int32
-	discarded    bool
-}
+const maxKeySize = 65000
+const maxValSize = 1 << 20
 
 func exceedsSize(prefix string, max int64, key []byte) error {
 	return errors.Errorf("%s with size %d exceeded %d limit. %s:\n%s",
 		prefix, len(key), max, prefix, hex.Dump(key[:1<<10]))
 }
-
-const maxKeySize = 65000
-const maxValSize = 1 << 20
 
 func ValidEntry(db *DB, key, val []byte) error {
 	switch {
@@ -61,6 +52,35 @@ func ValidEntry(db *DB, key, val []byte) error {
 		return err
 	}
 	return nil
+}
+
+// Txn represents a Badger transaction.
+type Txn struct {
+	readTs uint64
+	db     *DB
+
+	numIterators int32
+	discarded    bool
+}
+
+// NewReadTxn is a read-only transaction.
+// For read-only transactions, set update to false. In this mode, we don't track the rows read for
+// any changes. Thus, any long running iterations done in this mode wouldn't pay this overhead.
+//
+// Running transactions concurrently is OK. However, a transaction itself isn't thread safe, and
+// should only be run serially. It doesn't matter if a transaction is created by one goroutine and
+// passed down to other, as long as the Txn APIs are called serially.
+//
+// When you create a new transaction, it is absolutely essential to call
+// Discard(). This should be done irrespective of what the update param is set
+// to. Commit API internally runs Discard, but running it twice wouldn't cause
+// any issues.
+//
+//  txn := db.NewTransaction(false)
+//  defer txn.Discard()
+//  // Call various APIs.
+func (db *DB) NewReadTxn(readTs uint64) *Txn {
+	return &Txn{readTs: readTs, db: db}
 }
 
 // Get looks for key and returns corresponding Item.
@@ -121,32 +141,6 @@ func (txn *Txn) ReadTs() uint64 {
 // Discarded returns the discarded value of the transaction.
 func (txn *Txn) Discarded() bool {
 	return txn.discarded
-}
-
-// NewReadTxn is a read-only transaction.
-// For read-only transactions, set update to false. In this mode, we don't track the rows read for
-// any changes. Thus, any long running iterations done in this mode wouldn't pay this overhead.
-//
-// Running transactions concurrently is OK. However, a transaction itself isn't thread safe, and
-// should only be run serially. It doesn't matter if a transaction is created by one goroutine and
-// passed down to other, as long as the Txn APIs are called serially.
-//
-// When you create a new transaction, it is absolutely essential to call
-// Discard(). This should be done irrespective of what the update param is set
-// to. Commit API internally runs Discard, but running it twice wouldn't cause
-// any issues.
-//
-//  txn := db.NewTransaction(false)
-//  defer txn.Discard()
-//  // Call various APIs.
-func (db *DB) NewReadTxn(readTs uint64) *Txn {
-	txn := db.newTransaction()
-	txn.readTs = readTs
-	return txn
-}
-
-func (db *DB) newTransaction() *Txn {
-	return &Txn{db: db}
 }
 
 // View executes a function creating and managing a read-only transaction for the user. Error

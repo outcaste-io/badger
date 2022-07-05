@@ -142,8 +142,8 @@ func checkAndSetOptions(opt *Options) error {
 		return errors.New("Cannot have 1 compactor. Need at least 2")
 	}
 
-	if opt.InMemory && (opt.Dir != "" || opt.ValueDir != "") {
-		return errors.New("Cannot use badger in Disk-less mode with Dir or ValueDir set")
+	if opt.InMemory && opt.Dir != "" {
+		return errors.New("Cannot use badger in Disk-less mode with Dir set")
 	}
 	opt.maxBatchSize = (15 * opt.MemTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
@@ -191,25 +191,6 @@ func OpenManaged(opt Options) (*DB, error) {
 					_ = dirLockGuard.release()
 				}
 			}()
-			absDir, err := filepath.Abs(opt.Dir)
-			if err != nil {
-				return nil, err
-			}
-			absValueDir, err := filepath.Abs(opt.ValueDir)
-			if err != nil {
-				return nil, err
-			}
-			if absValueDir != absDir {
-				valueDirLockGuard, err = acquireDirectoryLock(opt.ValueDir, lockFile, opt.ReadOnly)
-				if err != nil {
-					return nil, err
-				}
-				defer func() {
-					if valueDirLockGuard != nil {
-						_ = valueDirLockGuard.release()
-					}
-				}()
-			}
 		}
 	}
 
@@ -581,10 +562,6 @@ func (db *DB) close() (err error) {
 	if syncErr := db.syncDir(db.opt.Dir); err == nil {
 		err = y.Wrap(syncErr, "DB.Close")
 	}
-	if syncErr := db.syncDir(db.opt.ValueDir); err == nil {
-		err = y.Wrap(syncErr, "DB.Close")
-	}
-
 	return err
 }
 
@@ -1122,8 +1099,8 @@ func (db *DB) calculateSize() {
 		return v
 	}
 
-	totalSize := func(dir string) (int64, int64) {
-		var lsmSize, vlogSize int64
+	totalSize := func(dir string) int64 {
+		var lsmSize int64
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -1132,24 +1109,17 @@ func (db *DB) calculateSize() {
 			switch ext {
 			case ".sst":
 				lsmSize += info.Size()
-			case ".vlog":
-				vlogSize += info.Size()
 			}
 			return nil
 		})
 		if err != nil {
 			db.opt.Debugf("Got error while calculating total size of directory: %s", dir)
 		}
-		return lsmSize, vlogSize
+		return lsmSize
 	}
 
-	lsmSize, vlogSize := totalSize(db.opt.Dir)
+	lsmSize := totalSize(db.opt.Dir)
 	y.LSMSizeSet(db.opt.MetricsEnabled, db.opt.Dir, newInt(lsmSize))
-	// If valueDir is different from dir, we'd have to do another walk.
-	if db.opt.ValueDir != db.opt.Dir {
-		_, vlogSize = totalSize(db.opt.ValueDir)
-	}
-	y.VlogSizeSet(db.opt.MetricsEnabled, db.opt.ValueDir, newInt(vlogSize))
 }
 
 func (db *DB) updateSize(lc *z.Closer) {
@@ -1173,13 +1143,12 @@ func (db *DB) updateSize(lc *z.Closer) {
 
 // Size returns the size of lsm and value log files in bytes. It can be used to decide how often to
 // call RunValueLogGC.
-func (db *DB) Size() (lsm, vlog int64) {
+func (db *DB) Size() (lsm int64) {
 	if y.LSMSizeGet(db.opt.MetricsEnabled, db.opt.Dir) == nil {
-		lsm, vlog = 0, 0
+		lsm = 0
 		return
 	}
 	lsm = y.LSMSizeGet(db.opt.MetricsEnabled, db.opt.Dir).(*expvar.Int).Value()
-	vlog = y.VlogSizeGet(db.opt.MetricsEnabled, db.opt.ValueDir).(*expvar.Int).Value()
 	return
 }
 
@@ -1891,7 +1860,7 @@ func (db *DB) syncDir(dir string) error {
 }
 
 func createDirs(opt Options) error {
-	for _, path := range []string{opt.Dir, opt.ValueDir} {
+	for _, path := range []string{opt.Dir} {
 		dirExists, err := exists(path)
 		if err != nil {
 			return y.Wrapf(err, "Invalid Dir: %q", path)
@@ -2011,4 +1980,11 @@ func (db *DB) LevelsToString() string {
 	}
 	b.WriteString("Level Done\n")
 	return b.String()
+}
+
+// SetDiscardTs sets a timestamp at or below which, any invalid or deleted
+// versions can be discarded from the LSM tree, and thence from the value log to
+// reclaim disk space. Can only be used with managed transactions.
+func (db *DB) SetDiscardTs(ts uint64) {
+	atomic.StoreUint64(&db.discardTs, ts)
 }

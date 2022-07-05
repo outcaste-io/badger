@@ -44,8 +44,7 @@ import (
 type Options struct {
 	// Required options.
 
-	Dir      string
-	ValueDir string
+	Dir string
 
 	// Usually modified options.
 
@@ -125,8 +124,7 @@ type Options struct {
 // Feel free to modify these to suit your needs with the WithX methods.
 func DefaultOptions(path string) Options {
 	return Options{
-		Dir:      path,
-		ValueDir: path,
+		Dir: path,
 
 		MemTableSize:        64 << 20,
 		BaseTableSize:       2 << 20,
@@ -331,16 +329,6 @@ func (opt Options) FromSuperFlag(superflag string) Options {
 // This is set automatically to be the path given to `DefaultOptions`.
 func (opt Options) WithDir(val string) Options {
 	opt.Dir = val
-	return opt
-}
-
-// WithValueDir returns a new Options value with ValueDir set to the given value.
-//
-// ValueDir is the path of the directory where value data will be stored in.
-// If it doesn't exist, Badger will try to create it for you.
-// This is set automatically to be the path given to `DefaultOptions`.
-func (opt Options) WithValueDir(val string) Options {
-	opt.ValueDir = val
 	return opt
 }
 
