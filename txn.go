@@ -147,12 +147,7 @@ func (db *DB) NewReadTxn(readTs uint64) *Txn {
 }
 
 func (db *DB) newTransaction() *Txn {
-	txn := &Txn{
-		db:    db,
-		count: 1,                       // One extra entry for BitFin.
-		size:  int64(len(txnKey) + 10), // Some buffer for the extra entry.
-	}
-	return txn
+	return &Txn{db: db}
 }
 
 // View executes a function creating and managing a read-only transaction for the user. Error

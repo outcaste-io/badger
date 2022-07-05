@@ -18,33 +18,6 @@ package badger
 
 import "sync/atomic"
 
-// NewWriteBatchAt is similar to NewWriteBatch but it allows user to set the commit timestamp.
-// NewWriteBatchAt is supposed to be used only in the managed mode.
-func (db *DB) NewWriteBatchAt(commitTs uint64) *WriteBatch {
-	wb := db.newWriteBatch(true)
-	wb.commitTs = commitTs
-	wb.txn.commitTs = commitTs
-	return wb
-}
-func (db *DB) NewManagedWriteBatch() *WriteBatch {
-	wb := db.newWriteBatch(true)
-	return wb
-}
-
-// CommitAt commits the transaction, following the same logic as Commit(), but
-// at the given commit timestamp. This will panic if not used with managed transactions.
-//
-// This is only useful for databases built on top of Badger (like Dgraph), and
-// can be ignored by most users.
-func (txn *Txn) CommitAt(commitTs uint64, callback func(error)) error {
-	txn.commitTs = commitTs
-	if callback == nil {
-		return txn.Commit()
-	}
-	txn.CommitWith(callback)
-	return nil
-}
-
 // SetDiscardTs sets a timestamp at or below which, any invalid or deleted
 // versions can be discarded from the LSM tree, and thence from the value log to
 // reclaim disk space. Can only be used with managed transactions.

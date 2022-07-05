@@ -470,8 +470,6 @@ func (it *Iterator) newItem() *Item {
 // Item returns pointer to the current key-value pair.
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *Item {
-	tx := it.txn
-	tx.addReadKey(it.item.Key())
 	return it.item
 }
 
@@ -697,9 +695,6 @@ func (it *Iterator) prefetch() {
 func (it *Iterator) Seek(key []byte) uint64 {
 	if it.iitr == nil {
 		return it.latestTs
-	}
-	if len(key) > 0 {
-		it.txn.addReadKey(key)
 	}
 	for i := it.data.pop(); i != nil; i = it.data.pop() {
 		i.wg.Wait()

@@ -17,10 +17,12 @@
 package badger
 
 import (
+	"sort"
 	"sync"
 	"sync/atomic"
 
 	"github.com/outcaste-io/badger/v3/pb"
+	"github.com/outcaste-io/badger/v3/skl"
 	"github.com/outcaste-io/badger/v3/y"
 	"github.com/outcaste-io/ristretto/z"
 	"github.com/pkg/errors"
@@ -30,31 +32,23 @@ import (
 // TODO(mrjn): Move this to use Skiplists directly. That's all we need.
 type WriteBatch struct {
 	sync.Mutex
-	txn      *Txn
+	sz       int64
+	entries  []*Entry
 	db       *DB
 	throttle *y.Throttle
 	err      atomic.Value
-
-	isManaged bool
-	commitTs  uint64
-	finished  bool
+	finished bool
 }
 
-// NewWriteBatch creates a new WriteBatch. This provides a way to conveniently do a lot of writes,
-// batching them up as tightly as possible in a single transaction and using callbacks to avoid
-// waiting for them to commit, thus achieving good performance. This API hides away the logic of
-// creating and committing transactions. Due to the nature of SSI guaratees provided by Badger,
-// blind writes can never encounter transaction conflicts (ErrConflict).
-func (db *DB) NewWriteBatch() *WriteBatch {
-	panic("cannot use NewWriteBatch in managed mode. Use NewWriteBatchAt instead")
+func (db *DB) NewManagedWriteBatch() *WriteBatch {
+	wb := db.newWriteBatch(true)
+	return wb
 }
 
 func (db *DB) newWriteBatch(isManaged bool) *WriteBatch {
 	return &WriteBatch{
-		db:        db,
-		isManaged: isManaged,
-		txn:       db.newTransaction(true, isManaged),
-		throttle:  y.NewThrottle(16),
+		db:       db,
+		throttle: y.NewThrottle(16),
 	}
 }
 
@@ -79,7 +73,6 @@ func (wb *WriteBatch) Cancel() {
 	if err := wb.throttle.Finish(); err != nil {
 		wb.db.opt.Errorf("WatchBatch.Cancel error while finishing: %v", err)
 	}
-	wb.txn.Discard()
 }
 
 func (wb *WriteBatch) callback(err error) {
@@ -94,6 +87,7 @@ func (wb *WriteBatch) callback(err error) {
 	wb.err.Store(err)
 }
 
+// Caller to writeKV must hold a write lock.
 func (wb *WriteBatch) writeKV(kv *pb.KV) error {
 	e := Entry{Key: kv.Key, Value: kv.Value}
 	if len(kv.UserMeta) > 0 {
@@ -129,29 +123,24 @@ func (wb *WriteBatch) WriteList(kvList *pb.KVList) error {
 	return nil
 }
 
+// Should be called with lock acquired.
+func (wb *WriteBatch) handleEntry(e *Entry) error {
+	if err := ValidEntry(wb.db, e.Key, e.Value); err != nil {
+		return errors.Wrapf(err, "invalid entry")
+	}
+	wb.entries = append(wb.entries, e)
+	wb.sz += e.estimateSize()
+	if wb.sz < wb.db.opt.MemTableSize {
+		return nil
+	}
+	return wb.commit()
+}
+
 // SetEntryAt is the equivalent of Txn.SetEntry but it also allows setting version for the entry.
 // SetEntryAt can be used only in managed mode.
 func (wb *WriteBatch) SetEntryAt(e *Entry, ts uint64) error {
 	e.version = ts
 	return wb.SetEntry(e)
-}
-
-// Should be called with lock acquired.
-func (wb *WriteBatch) handleEntry(e *Entry) error {
-	if err := wb.txn.SetEntry(e); !errors.Is(err, ErrTxnTooBig) {
-		return err
-	}
-	// Txn has reached it's zenith. Commit now.
-	if cerr := wb.commit(); cerr != nil {
-		return cerr
-	}
-	// This time the error must not be ErrTxnTooBig, otherwise, we make the
-	// error permanent.
-	if err := wb.txn.SetEntry(e); err != nil {
-		wb.err.Store(err)
-		return err
-	}
-	return nil
 }
 
 // SetEntry is the equivalent of Txn.SetEntry.
@@ -161,34 +150,10 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 	return wb.handleEntry(e)
 }
 
-// Set is equivalent of Txn.Set().
-func (wb *WriteBatch) Set(k, v []byte) error {
-	e := &Entry{Key: k, Value: v}
-	return wb.SetEntry(e)
-}
-
 // DeleteAt is equivalent of Txn.Delete but accepts a delete timestamp.
 func (wb *WriteBatch) DeleteAt(k []byte, ts uint64) error {
 	e := Entry{Key: k, meta: bitDelete, version: ts}
 	return wb.SetEntry(&e)
-}
-
-// Delete is equivalent of Txn.Delete.
-func (wb *WriteBatch) Delete(k []byte) error {
-	wb.Lock()
-	defer wb.Unlock()
-
-	if err := wb.txn.Delete(k); !errors.Is(err, ErrTxnTooBig) {
-		return err
-	}
-	if err := wb.commit(); err != nil {
-		return err
-	}
-	if err := wb.txn.Delete(k); err != nil {
-		wb.err.Store(err)
-		return err
-	}
-	return nil
 }
 
 // Caller to commit must hold a write lock.
@@ -203,9 +168,40 @@ func (wb *WriteBatch) commit() error {
 		wb.err.Store(err)
 		return err
 	}
-	wb.txn.CommitWith(wb.callback)
-	wb.txn = wb.db.newTransaction(true, wb.isManaged)
-	wb.txn.commitTs = wb.commitTs
+
+	// Set the versions to the keys.
+	for _, e := range wb.entries {
+		e.Key = y.KeyWithTs(e.Key, e.version)
+	}
+
+	// Sort all the keys with their timestamps attached.
+	sort.Slice(wb.entries, func(i, j int) bool {
+		return y.CompareKeys(wb.entries[i].Key, wb.entries[j].Key) < 0
+	})
+
+	// With the keys sorted, we can build the Skiplist quickly.
+	b := skl.NewBuilder(int64(float64(wb.sz) * 1.2))
+	for _, e := range wb.entries {
+		vs := y.ValueStruct{
+			Value:    e.Value,
+			UserMeta: e.UserMeta,
+			Meta:     e.meta,
+		}
+		b.Add(e.Key, vs)
+	}
+	sl := b.Skiplist()
+
+	// Handover the skiplist to DB.
+	err := wb.db.HandoverSkiplist(sl, func() {
+		wb.callback(nil)
+	})
+	if err != nil {
+		wb.err.Store(err)
+		return err
+	}
+
+	wb.entries = wb.entries[:0]
+	wb.sz = 0
 	return wb.Error()
 }
 
@@ -219,7 +215,6 @@ func (wb *WriteBatch) Flush() error {
 		return err
 	}
 	wb.finished = true
-	wb.txn.Discard()
 	wb.Unlock()
 
 	if err := wb.throttle.Finish(); err != nil {
