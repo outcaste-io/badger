@@ -830,6 +830,14 @@ func (db *DB) doWrites(lc *z.Closer) {
 //      Check(err)
 //   }
 func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+	wb := db.NewManagedWriteBatch()
+	for _, e := range entries {
+		if err := wb.SetEntry(e); err != nil {
+			return err
+		}
+	}
+	wb.Flush()
+
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
 		return err
