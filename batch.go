@@ -185,6 +185,9 @@ func (wb *WriteBatch) commit() error {
 	})
 
 	// With the keys sorted, we can build the Skiplist quickly.
+	if wb.sz < 1024 {
+		wb.sz = 1024
+	}
 	b := skl.NewBuilder(int64(float64(wb.sz) * 1.2))
 	for _, e := range wb.entries {
 		vs := y.ValueStruct{
