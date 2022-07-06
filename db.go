@@ -101,7 +101,6 @@ type DB struct {
 
 	closers closers
 
-	mt  *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 
 	discardTs uint64
@@ -275,10 +274,6 @@ func OpenManaged(opt Options) (*DB, error) {
 	db.calculateSize()
 	db.closers.updateSize = z.NewCloser(1)
 	go db.updateSize(db.closers.updateSize)
-
-	if !db.opt.ReadOnly {
-		db.mt = skl.NewSkiplist(arenaSize(db.opt))
-	}
 
 	// newLevelsController potentially loads files in directory.
 	if db.lc, err = newLevelsController(db, &manifest); err != nil {
@@ -456,43 +451,6 @@ func (db *DB) close() (err error) {
 	db.closers.pub.SignalAndWait()
 	db.closers.cacheHealth.Signal()
 
-	// Make sure that block writer is done pushing stuff into memtable!
-	// Otherwise, you will have a race condition: we are trying to flush memtables
-	// and remove them completely, while the block / memtable writer is still
-	// trying to push stuff into the memtable. This will also resolve the value
-	// offset problem: as we push into memtable, we update value offsets there.
-	if db.mt != nil {
-		if db.mt.Empty() {
-			// Remove the memtable if empty.
-			db.mt.DecrRef()
-		} else {
-			db.opt.Debugf("Flushing memtable")
-			for {
-				pushedFlushTask := func() bool {
-					db.lock.Lock()
-					defer db.lock.Unlock()
-					y.AssertTrue(db.mt != nil)
-					select {
-					case db.flushChan <- flushTask{sl: db.mt}:
-						db.imm = append(db.imm, db.mt) // Flusher will attempt to remove this from s.imm.
-						db.mt = nil                    // Will segfault if we try writing!
-						db.opt.Debugf("pushed to flush chan\n")
-						return true
-					default:
-						// If we fail to push, we need to unlock and wait for a short while.
-						// The flushing operation needs to update s.imm. Otherwise, we have a
-						// deadlock.
-						// TODO: Think about how to do this more cleanly, maybe without any locks.
-					}
-					return false
-				}()
-				if pushedFlushTask {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
-	}
 	db.stopMemoryFlush()
 	db.stopCompactions()
 
@@ -571,13 +529,6 @@ func (db *DB) getMemTables() ([]*skl.Skiplist, func()) {
 	defer db.lock.RUnlock()
 
 	var tables []*skl.Skiplist
-
-	// Mutable memtable does not exist in read-only mode.
-	if !db.opt.ReadOnly {
-		// Get mutable memtable.
-		tables = append(tables, db.mt)
-		db.mt.IncrRef()
-	}
 
 	// Get immutable memtables.
 	last := len(db.imm) - 1
@@ -667,24 +618,6 @@ var errNoRoom = errors.New("No room for write")
 
 func (db *DB) handoverSkiplist(r *handoverRequest) error {
 	sl, callback := r.skl, r.callback
-	// If we have some data in db.mt, we should push that first, so the ordering of writes is
-	// maintained.
-	if !db.mt.Empty() {
-		sz := db.mt.MemSize()
-		db.opt.Infof("Handover found %d B data in current memtable. Pushing to flushChan.", sz)
-		var err error
-		select {
-		case db.flushChan <- flushTask{sl: db.mt}:
-			db.imm = append(db.imm, db.mt)
-			db.mt = skl.NewSkiplist(arenaSize(db.opt))
-			if err != nil {
-				return y.Wrapf(err, "cannot push current memtable")
-			}
-		default:
-			return errNoRoom
-		}
-	}
-
 	req := &request{
 		Skl: sl,
 	}
@@ -1029,7 +962,6 @@ func (db *DB) Ranges(prefix []byte, numRanges int) []*keyRange {
 		for _, mt := range memTables {
 			mtSplits(mt)
 		}
-		mtSplits(db.mt)
 	}
 
 	// We have our splits now. Let's convert them to ranges.
@@ -1292,12 +1224,10 @@ func (db *DB) dropAll() (func(), error) {
 	defer db.lock.Unlock()
 
 	// Remove inmemory tables. Calling DecrRef for safety. Not sure if they're absolutely needed.
-	db.mt.DecrRef()
 	for _, mt := range db.imm {
 		mt.DecrRef()
 	}
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 
 	num, err := db.lc.dropTree()
 	if err != nil {
@@ -1464,7 +1394,6 @@ func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
-	db.imm = append(db.imm, db.mt)
 	for _, sl := range db.imm {
 		if sl.Empty() {
 			sl.DecrRef()
@@ -1485,7 +1414,6 @@ func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 	db.stopCompactions()
 	defer db.startCompactions()
 	db.imm = db.imm[:0]
-	db.mt = skl.NewSkiplist(arenaSize(db.opt))
 	if err != nil {
 		return y.Wrapf(err, "cannot create new mem table")
 	}
