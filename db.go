@@ -310,10 +310,6 @@ func Open(opt Options) (*DB, error) {
 	return db, nil
 }
 
-func (db *DB) discardAtOrBelow() uint64 {
-	return atomic.LoadUint64(&db.discardTs)
-}
-
 // initBannedNamespaces retrieves the banned namepsaces from the DB and updates in-memory structure.
 func (db *DB) initBannedNamespaces() error {
 	if db.opt.NamespaceOffset < 0 {
@@ -1704,4 +1700,8 @@ func (db *DB) LevelsToString() string {
 // reclaim disk space. Can only be used with managed transactions.
 func (db *DB) SetDiscardTs(ts uint64) {
 	atomic.StoreUint64(&db.discardTs, ts)
+}
+
+func (db *DB) discardAtOrBelow() uint64 {
+	return atomic.LoadUint64(&db.discardTs)
 }

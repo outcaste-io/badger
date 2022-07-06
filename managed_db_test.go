@@ -64,7 +64,8 @@ func TestDropAllManaged(t *testing.T) {
 	populate := func(db *DB, start uint64) {
 		batch := db.NewWriteBatch()
 		for i := start; i < start+N; i++ {
-			require.NoError(t, batch.SetEntryAt(NewEntry([]byte(key("key", int(i))), val(true)), uint64(i)))
+			require.NoError(t, batch.SetEntryAt(
+				NewEntry([]byte(key("key", int(i))), val(true)), uint64(i)))
 		}
 		require.NoError(t, batch.Flush())
 	}
