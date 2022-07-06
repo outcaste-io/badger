@@ -86,7 +86,7 @@ root() {
 
   echo "==> Running root level tests."
   set -e
-  go test $tags -timeout=25m . -v -race -parallel 16
+  go test --failfast $tags -timeout=25m . -v -race -parallel 16
   echo "==> DONE root level tests"
 }
 
@@ -112,4 +112,5 @@ export -f stream
 export -f manual
 export -f root
 
-parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+# parallel --halt now,fail=1 --progress --line-buffer ::: stream manual root
+parallel --halt now,fail=1 --progress --line-buffer ::: root

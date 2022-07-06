@@ -165,11 +165,6 @@ func (wb *WriteBatch) commit() error {
 	if wb.finished {
 		return y.ErrCommitAfterFinish
 	}
-	if err := wb.throttle.Do(); err != nil {
-		wb.err.Store(err)
-		return err
-	}
-
 	// Set the versions to the keys.
 	for _, e := range wb.entries {
 		if e.version > 0 {
@@ -199,6 +194,10 @@ func (wb *WriteBatch) commit() error {
 	}
 	sl := b.Skiplist()
 
+	if err := wb.throttle.Do(); err != nil {
+		wb.err.Store(err)
+		return err
+	}
 	// Handover the skiplist to DB.
 	err := wb.db.HandoverSkiplist(sl, func() {
 		wb.callback(nil)

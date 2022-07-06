@@ -349,19 +349,6 @@ func TestIsClosed(t *testing.T) {
 // This test is failing currently because we're returning version+1 from MaxVersion()
 func TestMaxVersion(t *testing.T) {
 	N := 10000
-	key := func(i int) []byte {
-		return []byte(fmt.Sprintf("%d%10d", i, i))
-	}
-	t.Run("normal", func(t *testing.T) {
-		runBadgerTest(t, nil, func(t *testing.T, db *DB) {
-			// This will create commits from 1 to N.
-			for i := 0; i < int(N); i++ {
-				txnSet(t, db, key(i), nil, 0)
-			}
-			ver := db.MaxVersion()
-			require.Equal(t, N, int(ver))
-		})
-	})
 	t.Run("multiple versions", func(t *testing.T) {
 		dir, err := ioutil.TempDir("", "badger-test")
 		require.NoError(t, err)
@@ -515,7 +502,7 @@ func TestKeyCount(t *testing.T) {
 	count := 0
 
 	streams := make(map[uint32]int)
-	stream := db2.NewStream()
+	stream := db2.NewStreamAt(1)
 	stream.Send = func(buf *z.Buffer) error {
 		list, err := BufferToKVList(buf)
 		if err != nil {

@@ -590,7 +590,15 @@ func (db *DB) handleHandovers(lc *z.Closer) {
 	for {
 		select {
 		case r := <-db.sklCh:
-			r.err = db.handoverSkiplist(r)
+			for {
+				db.lock.Lock()
+				r.err = db.handoverSkiplist(r, isLocked{})
+				db.lock.Unlock()
+				if r.err != errNoRoom {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			r.wg.Done()
 		case <-lc.HasBeenClosed():
 			return
@@ -616,17 +624,19 @@ func (db *DB) BatchSet(entries []*Entry) error {
 
 var errNoRoom = errors.New("No room for write")
 
-func (db *DB) handoverSkiplist(r *handoverRequest) error {
+type isLocked struct{}
+
+func (db *DB) handoverSkiplist(r *handoverRequest, _ isLocked) error {
 	sl, callback := r.skl, r.callback
 	req := &request{
 		Skl: sl,
 	}
 	reqs := []*request{req}
-	db.pub.sendUpdates(reqs)
 
 	select {
 	case db.flushChan <- flushTask{sl: sl, cb: callback}:
 		db.imm = append(db.imm, sl)
+		db.pub.sendUpdates(reqs)
 		return nil
 	default:
 		return errNoRoom
@@ -637,9 +647,6 @@ func (db *DB) HandoverSkiplist(skl *skl.Skiplist, callback func()) error {
 	if atomic.LoadInt32(&db.blockWrites) == 1 {
 		return ErrBlockedWrites
 	}
-
-	db.lock.Lock()
-	defer db.lock.Unlock()
 
 	req := &handoverRequest{skl: skl, callback: callback}
 	req.wg.Add(1)
@@ -1170,7 +1177,8 @@ func (db *DB) prepareToDrop() (func(), error) {
 			skls = append(skls, skl)
 		default:
 			for _, skl := range skls {
-				skl.err = db.handoverSkiplist(skl)
+				// This isn't locked. But, no writes are happening, so it's OK.
+				skl.err = db.handoverSkiplist(skl, isLocked{})
 				skl.wg.Done()
 				if skl.err != nil {
 					db.opt.Errorf("handoverSkiplists: %v", skl.err)

@@ -168,10 +168,13 @@ func TestConcurrentWrite(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
+				wb := db.NewWriteBatch()
 				for j := 0; j < m; j++ {
-					txnSet(t, db, []byte(fmt.Sprintf("k%05d_%08d", i, j)),
-						[]byte(fmt.Sprintf("v%05d_%08d", i, j)), byte(j%127))
+					e := NewEntry([]byte(fmt.Sprintf("k%05d_%08d", i, j)),
+						[]byte(fmt.Sprintf("v%05d_%08d", i, j))).WithMeta(byte(j % 127))
+					wb.SetEntryAt(e, 1)
 				}
+				require.NoError(t, wb.Flush())
 			}(i)
 		}
 		wg.Wait()
@@ -430,8 +433,8 @@ func TestGetMore(t *testing.T) {
 		data := func(i int) []byte {
 			return []byte(fmt.Sprintf("%b", i))
 		}
-		n := 200000
-		m := 45 // Increasing would cause ErrTxnTooBig
+		n := 100000
+		m := 1000 // Increasing would cause ErrTxnTooBig
 		for i := 0; i < n; i += m {
 			if (i % 10000) == 0 {
 				fmt.Printf("Inserting i=%d\n", i)
@@ -443,6 +446,7 @@ func TestGetMore(t *testing.T) {
 			require.NoError(t, wb.Flush())
 		}
 		require.NoError(t, db.validate())
+		t.Logf("Writes done")
 
 		for i := 0; i < n; i++ {
 			txn := db.NewReadTxn(1)
@@ -613,12 +617,15 @@ func TestIterate2Basic(t *testing.T) {
 
 		// n := 500000
 		n := 10000
+		wg := db.NewWriteBatch()
 		for i := 0; i < n; i++ {
 			if (i % 1000) == 0 {
 				t.Logf("Put i=%d\n", i)
 			}
-			txnSet(t, db, bkey(i), bval(i), byte(i%127))
+			e := NewEntry(bkey(i), bval(i)).WithMeta(byte(i % 127))
+			require.NoError(t, wg.SetEntryAt(e, 1))
 		}
+		require.NoError(t, wg.Flush())
 
 		opt := IteratorOptions{}
 		opt.PrefetchValues = true
