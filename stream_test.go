@@ -282,14 +282,14 @@ func TestStreamCustomKeyToList(t *testing.T) {
 	require.NoError(t, err)
 
 	var count int
+	wb := db.NewWriteBatch()
 	for _, key := range []string{"p0", "p1", "p2"} {
 		for i := 1; i <= 100; i++ {
-			wb := db.NewWriteBatch()
 			require.NoError(t, wb.SetEntryAt(NewEntry([]byte(key), value(i)), uint64(i)))
 			count++
-			require.NoError(t, wb.Flush())
 		}
 	}
+	require.NoError(t, wb.Flush())
 
 	stream := db.NewStreamAt(math.MaxUint64)
 	stream.LogPrefix = "Testing"
