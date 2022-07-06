@@ -127,7 +127,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 	y.Check2(rand.Read(value))
 
 	es := uint64(wo.keySz + wo.valSz) // entry size is keySz + valSz
-	batch := db.NewManagedWriteBatch()
+	batch := db.NewWriteBatch()
 
 	for i := uint64(1); i <= num; i++ {
 		key := make([]byte, wo.keySz)
@@ -139,7 +139,7 @@ func writeRandom(db *badger.DB, num uint64) error {
 		err := batch.SetEntryAt(e, 1)
 		for errors.Is(err, badger.ErrBlockedWrites) {
 			time.Sleep(time.Second)
-			batch = db.NewManagedWriteBatch()
+			batch = db.NewWriteBatch()
 			err = batch.SetEntryAt(e, 1)
 		}
 		if err != nil {
@@ -266,7 +266,7 @@ func writeBench(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Opening badger with options = %+v\n", opt)
-	db, err := badger.OpenManaged(opt)
+	db, err := badger.Open(opt)
 	if err != nil {
 		return err
 	}

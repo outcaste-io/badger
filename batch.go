@@ -40,12 +40,7 @@ type WriteBatch struct {
 	finished bool
 }
 
-func (db *DB) NewManagedWriteBatch() *WriteBatch {
-	wb := db.newWriteBatch(true)
-	return wb
-}
-
-func (db *DB) newWriteBatch(isManaged bool) *WriteBatch {
+func (db *DB) NewWriteBatch() *WriteBatch {
 	return &WriteBatch{
 		db:       db,
 		throttle: y.NewThrottle(16),
@@ -148,6 +143,12 @@ func (wb *WriteBatch) SetEntry(e *Entry) error {
 	wb.Lock()
 	defer wb.Unlock()
 	return wb.handleEntry(e)
+}
+
+// SetAt sets key at given ts.
+func (wb *WriteBatch) SetAt(k []byte, v []byte, ts uint64) error {
+	e := Entry{Key: k, Value: v, version: ts}
+	return wb.SetEntry(&e)
 }
 
 // DeleteAt is equivalent of Txn.Delete but accepts a delete timestamp.

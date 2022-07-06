@@ -112,7 +112,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open DB
-	db, err := badger.OpenManaged(bopt)
+	db, err := badger.Open(bopt)
 	if err != nil {
 		return y.Wrap(err, "failed to open database")
 	}

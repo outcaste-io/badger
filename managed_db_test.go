@@ -1,18 +1,14 @@
 package badger
 
 import (
-	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/outcaste-io/badger/v3/y"
-	"github.com/outcaste-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,7 +39,7 @@ func numKeys(db *DB) int {
 }
 
 func numKeysManaged(db *DB, readTs uint64) int {
-	txn := db.NewTransactionAt(readTs, false)
+	txn := db.NewReadTxn(readTs)
 	defer txn.Discard()
 
 	itr := txn.NewIterator(DefaultIteratorOptions)
@@ -61,7 +57,6 @@ func TestDropAllManaged(t *testing.T) {
 	require.NoError(t, err)
 	defer removeDir(dir)
 	opts := getTestOptions(dir)
-	opts.managedTxns = true
 	db, err := Open(opts)
 	require.NoError(t, err)
 
@@ -70,9 +65,9 @@ func TestDropAllManaged(t *testing.T) {
 		var wg sync.WaitGroup
 		for i := start; i < start+N; i++ {
 			wg.Add(1)
-			txn := db.NewTransactionAt(math.MaxUint64, true)
-			require.NoError(t, txn.SetEntry(NewEntry([]byte(key("key", int(i))), val(true))))
-			require.NoError(t, txn.CommitAt(uint64(i), func(err error) {
+			batch := db.NewWriteBatch()
+			require.NoError(t, batch.SetEntryAt(NewEntry([]byte(key("key", int(i))), val(true)), uint64(i)))
+			require.NoError(t, batch.FlushWith(func(err error) {
 				require.NoError(t, err)
 				wg.Done()
 			}))
@@ -93,7 +88,6 @@ func TestDropAllManaged(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Ensure that value log is correctly replayed, that we are preserving badgerHead.
-	opts.managedTxns = true
 	db2, err := Open(opts)
 	require.NoError(t, err)
 	require.Equal(t, int(N), numKeysManaged(db2, math.MaxUint64))
@@ -112,7 +106,7 @@ func TestDropAll(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
+			require.NoError(t, writer.SetAt([]byte(key("key", int(i))), val(true), 1))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -148,7 +142,7 @@ func TestDropAllTwice(t *testing.T) {
 		populate := func(db *DB) {
 			writer := db.NewWriteBatch()
 			for i := uint64(0); i < N; i++ {
-				require.NoError(t, writer.Set([]byte(key("key", int(i))), val(false)))
+				require.NoError(t, writer.SetAt([]byte(key("key", int(i))), val(false), 1))
 			}
 			require.NoError(t, writer.Flush())
 		}
@@ -192,7 +186,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	populate := func(db *DB) {
 		writer := db.NewWriteBatch()
 		for i := uint64(0); i < N; i++ {
-			require.NoError(t, writer.Set([]byte(key("key", int(i))), val(true)))
+			require.NoError(t, writer.SetAt([]byte(key("key", int(i))), val(true), 1))
 		}
 		require.NoError(t, writer.Flush())
 	}
@@ -200,7 +194,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	populate(db)
 	require.Equal(t, int(N), numKeys(db))
 
-	txn := db.NewTransaction(true)
+	txn := db.NewReadTxn(math.MaxUint64)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -247,6 +241,7 @@ func TestDropAllWithPendingTxn(t *testing.T) {
 	wg.Wait()
 }
 
+/*
 func TestDropReadOnly(t *testing.T) {
 	dir, err := ioutil.TempDir("", "badger-test")
 	require.NoError(t, err)
@@ -809,3 +804,4 @@ func TestWriteViaSkip(t *testing.T) {
 		require.Equal(t, 100, i)
 	})
 }
+*/

@@ -151,12 +151,12 @@ func checkAndSetOptions(opt *Options) error {
 	return nil
 }
 
-// OpenManaged returns a new DB, which allows more control over setting
+// Open returns a new DB, which allows more control over setting
 // transaction timestamps, aka managed mode.
 //
 // This is only useful for databases built on top of Badger (like Dgraph), and
 // can be ignored by most users.
-func OpenManaged(opt Options) (*DB, error) {
+func Open(opt Options) (*DB, error) {
 	if err := checkAndSetOptions(&opt); err != nil {
 		return nil, err
 	}
@@ -605,7 +605,7 @@ func (db *DB) handleHandovers(lc *z.Closer) {
 //      Check(err)
 //   }
 func (db *DB) BatchSet(entries []*Entry) error {
-	wb := db.NewManagedWriteBatch()
+	wb := db.NewWriteBatch()
 	for _, e := range entries {
 		if err := wb.SetEntry(e); err != nil {
 			return err
@@ -1594,7 +1594,7 @@ func (db *DB) StreamDB(outOptions Options) error {
 	outDir := outOptions.Dir
 
 	// Open output DB.
-	outDB, err := OpenManaged(outOptions)
+	outDB, err := Open(outOptions)
 	if err != nil {
 		return y.Wrapf(err, "cannot open out DB at %s", outDir)
 	}
