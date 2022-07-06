@@ -171,7 +171,11 @@ func (wb *WriteBatch) commit() error {
 
 	// Set the versions to the keys.
 	for _, e := range wb.entries {
-		e.Key = y.KeyWithTs(e.Key, e.version)
+		if e.version > 0 {
+			e.Key = y.KeyWithTs(e.Key, e.version)
+		} else {
+			// We have to assume that e.Key already has version in it.
+		}
 	}
 
 	// Sort all the keys with their timestamps attached.
@@ -205,9 +209,7 @@ func (wb *WriteBatch) commit() error {
 	return wb.Error()
 }
 
-// Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
-// returns any error stored by WriteBatch.
-func (wb *WriteBatch) Flush() error {
+func (wb *WriteBatch) FlushWith(cb func(err error)) error {
 	wb.Lock()
 	err := wb.commit()
 	if err != nil {
@@ -217,14 +219,38 @@ func (wb *WriteBatch) Flush() error {
 	wb.finished = true
 	wb.Unlock()
 
-	if err := wb.throttle.Finish(); err != nil {
-		if wb.Error() != nil {
-			return errors.Errorf("wb.err: %s err: %s", wb.Error(), err)
+	done := func() error {
+		if err := wb.throttle.Finish(); err != nil {
+			if wb.Error() != nil {
+				return errors.Errorf("wb.err: %s err: %s", wb.Error(), err)
+			}
+			return err
 		}
-		return err
+		return wb.Error()
 	}
 
-	return wb.Error()
+	go func() {
+		err := done()
+		cb(err)
+	}()
+	return nil
+}
+
+// Flush must be called at the end to ensure that any pending writes get committed to Badger. Flush
+// returns any error stored by WriteBatch.
+func (wb *WriteBatch) Flush() error {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	var ferr error
+	if err := wb.FlushWith(func(err error) {
+		ferr = err
+		wg.Done()
+	}); err != nil {
+		return err
+	}
+	wg.Wait()
+	return ferr
 }
 
 // Error returns any errors encountered so far. No commits would be run once an error is detected.

@@ -46,15 +46,10 @@ import (
 const (
 	bitDelete                 byte = 1 << 0 // Set if the key has been deleted.
 	BitDiscardEarlierVersions byte = 1 << 2 // Set if earlier versions can be discarded.
-
-	// The MSB 2 bits are for transactions.
-	bitTxn    byte = 1 << 6 // Set if the entry is part of a txn.
-	bitFinTxn byte = 1 << 7 // Set if the entry is to indicate end of txn in value log.
 )
 
 var (
 	badgerPrefix = []byte("!badger!")       // Prefix for internal keys used by badger.
-	txnKey       = []byte("!badger!txn")    // For indicating end of entries in txn.
 	bannedNsKey  = []byte("!badger!banned") // For storing the banned namespaces.
 )
 
@@ -113,7 +108,6 @@ type DB struct {
 	opt       Options
 	manifest  *manifestFile
 	lc        *levelsController
-	writeCh   chan *request
 	sklCh     chan *handoverRequest
 	flushChan chan flushTask // For flushing memtables.
 	closeOnce sync.Once      // For closing DB only once.
@@ -129,10 +123,6 @@ type DB struct {
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
 }
-
-const (
-	kvWriteChCapacity = 1000
-)
 
 func checkAndSetOptions(opt *Options) error {
 	// It's okay to have zero compactors which will disable all compactions but
@@ -207,7 +197,6 @@ func OpenManaged(opt Options) (*DB, error) {
 	db := &DB{
 		imm:              make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:        make(chan flushTask, opt.NumMemtables),
-		writeCh:          make(chan *request, kvWriteChCapacity),
 		sklCh:            make(chan *handoverRequest),
 		opt:              opt,
 		manifest:         manifestFile,
@@ -314,8 +303,7 @@ func OpenManaged(opt Options) (*DB, error) {
 		return db, errors.Wrapf(err, "While setting banned keys")
 	}
 
-	db.closers.writes = z.NewCloser(2)
-	go db.doWrites(db.closers.writes)
+	db.closers.writes = z.NewCloser(1)
 	go db.handleHandovers(db.closers.writes)
 
 	db.closers.pub = z.NewCloser(1)
@@ -463,7 +451,6 @@ func (db *DB) close() (err error) {
 	db.closers.writes.SignalAndWait()
 
 	// Don't accept any more write.
-	close(db.writeCh)
 	close(db.sklCh)
 
 	db.closers.pub.SignalAndWait()
@@ -647,105 +634,6 @@ func (db *DB) get(key []byte) (y.ValueStruct, error) {
 	return db.lc.get(key, maxVs, 0)
 }
 
-var requestPool = sync.Pool{
-	New: func() interface{} {
-		return new(request)
-	},
-}
-
-func (db *DB) writeToLSM(b *request) error {
-	db.lock.RLock()
-	defer db.lock.RUnlock()
-	for _, entry := range b.Entries {
-		// Will include deletion / tombstone case.
-		db.mt.Put(entry.Key,
-			y.ValueStruct{
-				Value: entry.Value,
-				// Ensure value pointer flag is removed. Otherwise, the value will fail
-				// to be retrieved during iterator prefetch. `bitValuePointer` is only
-				// known to be set in write to LSM when the entry is loaded from a backup
-				// with lower ValueThreshold and its value was stored in the value log.
-				Meta:     entry.meta,
-				UserMeta: entry.UserMeta,
-			})
-	}
-	return nil
-}
-
-// writeRequests is called serially by only one goroutine.
-func (db *DB) writeRequests(reqs []*request) error {
-	if len(reqs) == 0 {
-		return nil
-	}
-
-	done := func(err error) {
-		for _, r := range reqs {
-			r.Err = err
-			r.Wg.Done()
-		}
-	}
-
-	db.opt.Debugf("Sending updates to subscribers")
-	db.pub.sendUpdates(reqs)
-	db.opt.Debugf("Writing to memtable")
-	var count int
-	for _, b := range reqs {
-		if len(b.Entries) == 0 {
-			continue
-		}
-		count += len(b.Entries)
-		var i uint64
-		var err error
-		for err = db.ensureRoomForWrite(); errors.Is(err, errNoRoom); err = db.ensureRoomForWrite() {
-			i++
-			if i%100 == 0 {
-				db.opt.Debugf("Making room for writes")
-			}
-			// We need to poll a bit because both hasRoomForWrite and the flusher need access to s.imm.
-			// When flushChan is full and you are blocked there, and the flusher is trying to update s.imm,
-			// you will get a deadlock.
-			time.Sleep(10 * time.Millisecond)
-		}
-		if err != nil {
-			done(err)
-			return y.Wrap(err, "writeRequests")
-		}
-		if err := db.writeToLSM(b); err != nil {
-			done(err)
-			return y.Wrap(err, "writeRequests")
-		}
-	}
-	done(nil)
-	db.opt.Debugf("%d entries written", count)
-	return nil
-}
-
-func (db *DB) sendToWriteCh(entries []*Entry) (*request, error) {
-	if atomic.LoadInt32(&db.blockWrites) == 1 {
-		return nil, ErrBlockedWrites
-	}
-	var count, size int64
-	for _, e := range entries {
-		size += e.estimateSize()
-		count++
-	}
-	if count >= db.opt.maxBatchCount || size >= db.opt.maxBatchSize {
-		return nil, ErrTxnTooBig
-	}
-
-	// We can only service one request because we need each txn to be stored in a contiguous section.
-	// Txns should not interleave among other txns or rewrites.
-	req := requestPool.Get().(*request)
-	req.reset()
-	req.Entries = entries
-	req.Wg.Add(1)
-	req.IncrRef()     // for db write
-	db.writeCh <- req // Handled in doWrites.
-	y.NumPutsAdd(db.opt.MetricsEnabled, int64(len(entries)))
-
-	return req, nil
-}
-
 func (db *DB) handleHandovers(lc *z.Closer) {
 	defer lc.Done()
 	for {
@@ -759,127 +647,23 @@ func (db *DB) handleHandovers(lc *z.Closer) {
 	}
 }
 
-func (db *DB) doWrites(lc *z.Closer) {
-	defer lc.Done()
-	pendingCh := make(chan struct{}, 1)
-
-	writeRequests := func(reqs []*request) {
-		if err := db.writeRequests(reqs); err != nil {
-			db.opt.Errorf("writeRequests: %v", err)
-		}
-		<-pendingCh
-	}
-
-	// This variable tracks the number of pending writes.
-	reqLen := new(expvar.Int)
-	y.PendingWritesSet(db.opt.MetricsEnabled, db.opt.Dir, reqLen)
-
-	reqs := make([]*request, 0, 10)
-	for {
-		var r *request
-		select {
-		case r = <-db.writeCh:
-		case <-lc.HasBeenClosed():
-			goto closedCase
-		}
-
-		for {
-			reqs = append(reqs, r)
-			reqLen.Set(int64(len(reqs)))
-
-			if len(reqs) >= 3*kvWriteChCapacity {
-				pendingCh <- struct{}{} // blocking.
-				goto writeCase
-			}
-
-			select {
-			// Either push to pending, or continue to pick from writeCh.
-			case r = <-db.writeCh:
-			case pendingCh <- struct{}{}:
-				goto writeCase
-			case <-lc.HasBeenClosed():
-				goto closedCase
-			}
-		}
-
-	closedCase:
-		// All the pending request are drained.
-		// Don't close the writeCh, because it has be used in several places.
-		for {
-			select {
-			case r = <-db.writeCh:
-				reqs = append(reqs, r)
-			default:
-				pendingCh <- struct{}{} // Push to pending before doing a write.
-				writeRequests(reqs)
-				return
-			}
-		}
-
-	writeCase:
-		go writeRequests(reqs)
-		reqs = make([]*request, 0, 10)
-		reqLen.Set(0)
-	}
-}
-
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback
 // function which is called when all the sets are complete. If a request level
 // error occurs, it will be passed back via the callback.
 //   err := kv.BatchSetAsync(entries, func(err error)) {
 //      Check(err)
 //   }
-func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
+func (db *DB) BatchSet(entries []*Entry) error {
 	wb := db.NewManagedWriteBatch()
 	for _, e := range entries {
 		if err := wb.SetEntry(e); err != nil {
 			return err
 		}
 	}
-	wb.Flush()
-
-	req, err := db.sendToWriteCh(entries)
-	if err != nil {
-		return err
-	}
-	go func() {
-		err := req.Wait()
-		// Write is complete. Let's call the callback function now.
-		f(err)
-	}()
-	return nil
+	return wb.Flush()
 }
 
 var errNoRoom = errors.New("No room for write")
-
-// ensureRoomForWrite is always called serially.
-func (db *DB) ensureRoomForWrite() error {
-	var err error
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
-	y.AssertTrue(db.mt != nil) // A nil mt indicates that DB is being closed.
-	if db.mt.MemSize() < db.opt.MemTableSize {
-		return nil
-	}
-
-	select {
-	case db.flushChan <- flushTask{sl: db.mt}:
-		db.opt.Debugf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			db.mt.MemSize(), len(db.flushChan))
-		// We manage to push this task. Let's modify imm.
-		db.imm = append(db.imm, db.mt)
-		db.mt = skl.NewSkiplist(arenaSize(db.opt))
-		if err != nil {
-			return y.Wrapf(err, "cannot create new mem table")
-		}
-		// New memtable is empty. We certainly have room.
-		return nil
-	default:
-		// We need to do this to unlock and allow the flusher to modify imm.
-		return errNoRoom
-	}
-}
 
 func (db *DB) handoverSkiplist(r *handoverRequest) error {
 	sl, callback := r.skl, r.callback
@@ -1430,8 +1214,7 @@ func (db *DB) blockWrite() error {
 }
 
 func (db *DB) unblockWrite() {
-	db.closers.writes = z.NewCloser(2)
-	go db.doWrites(db.closers.writes)
+	db.closers.writes = z.NewCloser(1)
 	go db.handleHandovers(db.closers.writes)
 
 	// Resume writes.
@@ -1448,18 +1231,12 @@ func (db *DB) prepareToDrop() (func(), error) {
 	if err := db.blockWrite(); err != nil {
 		return func() {}, err
 	}
-	reqs := make([]*request, 0, 10)
 	skls := make([]*handoverRequest, 0, 5)
 	for {
 		select {
-		case r := <-db.writeCh:
-			reqs = append(reqs, r)
 		case skl := <-db.sklCh:
 			skls = append(skls, skl)
 		default:
-			if err := db.writeRequests(reqs); err != nil {
-				db.opt.Errorf("writeRequests: %v", err)
-			}
 			for _, skl := range skls {
 				skl.err = db.handoverSkiplist(skl)
 				skl.wg.Done()
@@ -1770,11 +1547,7 @@ func (db *DB) BanNamespace(ns uint64) error {
 		Key:   key,
 		Value: nil,
 	}}
-	req, err := db.sendToWriteCh(entry)
-	if err != nil {
-		return err
-	}
-	if err := req.Wait(); err != nil {
+	if err := db.BatchSet(entry); err != nil {
 		return err
 	}
 	db.bannedNamespaces.add(ns)

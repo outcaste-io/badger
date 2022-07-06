@@ -18,6 +18,10 @@ package badger
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
+
+	"github.com/outcaste-io/badger/v3/skl"
 )
 
 // Entry provides Key, Value, UserMeta and ExpiresAt. This struct can be used by
@@ -71,4 +75,44 @@ func (e *Entry) WithMeta(meta byte) *Entry {
 func (e *Entry) WithDiscard() *Entry {
 	e.meta = BitDiscardEarlierVersions
 	return e
+}
+
+type request struct {
+	// Input values
+	Skl     *skl.Skiplist
+	Entries []*Entry
+	ref     int32
+}
+
+type handoverRequest struct {
+	skl      *skl.Skiplist
+	callback func()
+	err      error
+	wg       sync.WaitGroup
+}
+
+func (req *request) IncrRef() {
+	atomic.AddInt32(&req.ref, 1)
+}
+
+func (req *request) DecrRef() {
+	nRef := atomic.AddInt32(&req.ref, -1)
+	if nRef > 0 {
+		return
+	}
+	req.Entries = nil
+}
+
+type requests []*request
+
+func (reqs requests) DecrRef() {
+	for _, req := range reqs {
+		req.DecrRef()
+	}
+}
+
+func (reqs requests) IncrRef() {
+	for _, req := range reqs {
+		req.IncrRef()
+	}
 }
