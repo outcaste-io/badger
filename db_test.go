@@ -83,7 +83,7 @@ func getItemValue(t *testing.T, item *Item) (val []byte) {
 	return v
 }
 
-func txnSet(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
+func txnSetSlow(t *testing.T, kv *DB, key []byte, val []byte, meta byte) {
 	wb := kv.NewWriteBatch()
 	require.NoError(t, wb.SetEntryAt(NewEntry(key, val).WithMeta(meta), 1))
 	require.NoError(t, wb.Flush())
@@ -121,7 +121,7 @@ func runBadgerTest(t *testing.T, opts *Options, test func(t *testing.T, db *DB))
 func TestWrite(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		for i := 0; i < 100; i++ {
-			txnSet(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
+			txnSetSlow(t, db, []byte(fmt.Sprintf("key%d", i)), []byte(fmt.Sprintf("val%d", i)), 0x00)
 		}
 	})
 }
@@ -215,7 +215,7 @@ func TestConcurrentWrite(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	test := func(t *testing.T, db *DB) {
-		txnSet(t, db, []byte("key1"), []byte("val1"), 0x08)
+		txnSetSlow(t, db, []byte("key1"), []byte("val1"), 0x08)
 
 		txn := db.NewReadTxn(math.MaxUint64)
 		item, err := txn.Get([]byte("key1"))
@@ -224,7 +224,7 @@ func TestGet(t *testing.T) {
 		require.Equal(t, byte(0x08), item.UserMeta())
 		txn.Discard()
 
-		txnSet(t, db, []byte("key1"), []byte("val2"), 0x09)
+		txnSetSlow(t, db, []byte("key1"), []byte("val2"), 0x09)
 
 		txn = db.NewReadTxn(math.MaxUint64)
 		item, err = txn.Get([]byte("key1"))
@@ -240,7 +240,7 @@ func TestGet(t *testing.T) {
 		require.Equal(t, ErrKeyNotFound, err)
 		txn.Discard()
 
-		txnSet(t, db, []byte("key1"), []byte("val3"), 0x01)
+		txnSetSlow(t, db, []byte("key1"), []byte("val3"), 0x01)
 
 		txn = db.NewReadTxn(math.MaxUint64)
 		item, err = txn.Get([]byte("key1"))
@@ -250,7 +250,7 @@ func TestGet(t *testing.T) {
 		txn.Discard()
 
 		longVal := make([]byte, 1000)
-		txnSet(t, db, []byte("key1"), longVal, 0x00)
+		txnSetSlow(t, db, []byte("key1"), longVal, 0x00)
 
 		txn = db.NewReadTxn(math.MaxUint64)
 		item, err = txn.Get([]byte("key1"))
@@ -282,7 +282,7 @@ func TestGetAfterDelete(t *testing.T) {
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		// populate with one entry
 		key := []byte("key")
-		txnSet(t, db, key, []byte("val1"), 0x00)
+		txnSetSlow(t, db, key, []byte("val1"), 0x00)
 		txnDelete(t, db, key)
 		require.NoError(t, db.View(func(txn *Txn) error {
 			_, err := txn.Get(key)
@@ -535,17 +535,17 @@ func TestExistsMore(t *testing.T) {
 		//	n := 500000
 		n := 10000
 		m := 45
+		wb := db.NewWriteBatch()
 		for i := 0; i < n; i += m {
 			if (i % 1000) == 0 {
 				t.Logf("Putting i=%d\n", i)
 			}
-			wb := db.NewWriteBatch()
 			for j := i; j < i+m && j < n; j++ {
 				require.NoError(t, wb.SetEntryAt(NewEntry([]byte(fmt.Sprintf("%09d", j)),
 					[]byte(fmt.Sprintf("%09d", j))), 1))
 			}
-			require.NoError(t, wb.Flush())
 		}
+		require.NoError(t, wb.Flush())
 		db.validate()
 
 		for i := 0; i < n; i++ {
@@ -566,16 +566,17 @@ func TestExistsMore(t *testing.T) {
 		}))
 
 		// "Delete" key.
+		wb = db.NewWriteBatch()
 		for i := 0; i < n; i += m {
 			if (i % 1000) == 0 {
 				fmt.Printf("Deleting i=%d\n", i)
 			}
-			wb := db.NewWriteBatch()
 			for j := i; j < i+m && j < n; j++ {
 				require.NoError(t, wb.DeleteAt([]byte(fmt.Sprintf("%09d", j)), 1))
 			}
-			require.NoError(t, wb.Flush())
 		}
+		require.NoError(t, wb.Flush())
+
 		db.validate()
 		for i := 0; i < n; i++ {
 			if (i % 10000) == 0 {

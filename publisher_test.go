@@ -64,7 +64,7 @@ func TestPublisherDeadlock(t *testing.T) {
 
 		firstUpdate.Wait()
 		req := int64(0)
-		for i := 1; i < 1110; i++ {
+		for i := 1; i < 111; i++ {
 			time.Sleep(time.Millisecond * 10)
 			go func(i int) {
 				wb := db.NewWriteBatch()
@@ -75,7 +75,7 @@ func TestPublisherDeadlock(t *testing.T) {
 			}(i)
 		}
 		for {
-			if atomic.LoadInt64(&req) == 1109 {
+			if atomic.LoadInt64(&req) == 110 {
 				break
 			}
 			time.Sleep(time.Second)

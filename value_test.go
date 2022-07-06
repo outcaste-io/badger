@@ -37,7 +37,7 @@ func TestValueEntryChecksum(t *testing.T) {
 		db, err := Open(opt)
 		require.NoError(t, err)
 
-		txnSet(t, db, k, v, 0)
+		txnSetSlow(t, db, k, v, 0)
 		require.NoError(t, db.Close())
 
 		db, err = Open(opt)

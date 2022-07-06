@@ -62,17 +62,11 @@ func TestDropAllManaged(t *testing.T) {
 
 	N := uint64(10000)
 	populate := func(db *DB, start uint64) {
-		var wg sync.WaitGroup
+		batch := db.NewWriteBatch()
 		for i := start; i < start+N; i++ {
-			wg.Add(1)
-			batch := db.NewWriteBatch()
 			require.NoError(t, batch.SetEntryAt(NewEntry([]byte(key("key", int(i))), val(true)), uint64(i)))
-			require.NoError(t, batch.FlushWith(func(err error) {
-				require.NoError(t, err)
-				wg.Done()
-			}))
 		}
-		wg.Wait()
+		require.NoError(t, batch.Flush())
 	}
 
 	populate(db, N)
