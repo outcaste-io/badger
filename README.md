@@ -2,8 +2,6 @@
 
 **NOTE: This repo has been merged into Outserv under badger directory, and is no longer being maintained.**
 
-**This is a fork of dgraph-io/badger, maintained by the original authors of Badger.**
-
 Core Maintainers (sorted alphabetically):
 
 - https://github.com/ahsanbarkati
