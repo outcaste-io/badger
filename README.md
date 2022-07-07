@@ -1,5 +1,7 @@
 # BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/outcaste-io/badger/v3.svg)](https://pkg.go.dev/github.com/outcaste-io/badger/v3)
 
+**NOTE: This repo has been merged into Outserv under badger directory, and is no longer being maintained.**
+
 **This is a fork of dgraph-io/badger, maintained by the original authors of Badger.**
 
 Core Maintainers (sorted alphabetically):
