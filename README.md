@@ -1,6 +1,6 @@
 # BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/outcaste-io/badger/v3.svg)](https://pkg.go.dev/github.com/outcaste-io/badger/v3)
 
-**NOTE: This repo has been merged into Outserv under badger directory, and is no longer being maintained.**
+**NOTE: This repo is a leaner version of Badger being used by Outserv. It doesn't have Value Log, Write Ahead Log, Write Transactions (only read transactions), and all writes are done via WriteBatch or via HandoverSkiplist.**
 
 Core Maintainers (sorted alphabetically):
 
