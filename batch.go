@@ -21,9 +21,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/outcaste-io/badger/v3/pb"
-	"github.com/outcaste-io/badger/v3/skl"
-	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4/pb"
+	"github.com/outcaste-io/badger/v4/skl"
+	"github.com/outcaste-io/badger/v4/y"
 	"github.com/outcaste-io/ristretto/z"
 	"github.com/pkg/errors"
 )

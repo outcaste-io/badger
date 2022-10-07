@@ -23,7 +23,7 @@ import (
 	"runtime"
 
 	"github.com/dustin/go-humanize"
-	"github.com/outcaste-io/badger/v3/badger/cmd"
+	"github.com/outcaste-io/badger/v4/badger/cmd"
 	"github.com/outcaste-io/ristretto/z"
 	"go.opencensus.io/zpages"
 )

@@ -30,12 +30,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/outcaste-io/badger/v3/options"
+	"github.com/outcaste-io/badger/v4/options"
 	"github.com/pkg/errors"
 
-	"github.com/outcaste-io/badger/v3/pb"
-	"github.com/outcaste-io/badger/v3/table"
-	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4/pb"
+	"github.com/outcaste-io/badger/v4/table"
+	"github.com/outcaste-io/badger/v4/y"
 	"github.com/outcaste-io/ristretto/z"
 	"github.com/stretchr/testify/require"
 )

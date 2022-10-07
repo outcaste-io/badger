@@ -24,10 +24,10 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/outcaste-io/badger/v3"
-	"github.com/outcaste-io/badger/v3/options"
-	"github.com/outcaste-io/badger/v3/table"
-	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4"
+	"github.com/outcaste-io/badger/v4/options"
+	"github.com/outcaste-io/badger/v4/table"
+	"github.com/outcaste-io/badger/v4/y"
 	"github.com/spf13/cobra"
 )
 

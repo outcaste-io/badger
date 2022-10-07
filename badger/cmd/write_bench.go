@@ -33,10 +33,10 @@ import (
 	humanize "github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 
-	"github.com/outcaste-io/badger/v3"
-	"github.com/outcaste-io/badger/v3/options"
-	"github.com/outcaste-io/badger/v3/pb"
-	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4"
+	"github.com/outcaste-io/badger/v4/options"
+	"github.com/outcaste-io/badger/v4/pb"
+	"github.com/outcaste-io/badger/v4/y"
 	"github.com/outcaste-io/ristretto/z"
 )
 

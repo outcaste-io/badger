@@ -29,8 +29,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/outcaste-io/badger/v3/options"
-	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4/options"
+	"github.com/outcaste-io/badger/v4/y"
 )
 
 // summary is produced when DB is closed. Currently it is used only for testing.

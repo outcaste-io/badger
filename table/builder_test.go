@@ -25,10 +25,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/outcaste-io/badger/v3/fb"
-	"github.com/outcaste-io/badger/v3/options"
-	"github.com/outcaste-io/badger/v3/pb"
-	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4/fb"
+	"github.com/outcaste-io/badger/v4/options"
+	"github.com/outcaste-io/badger/v4/pb"
+	"github.com/outcaste-io/badger/v4/y"
 	"github.com/outcaste-io/ristretto"
 )
 
