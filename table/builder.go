@@ -28,6 +28,7 @@ import (
 	"github.com/golang/snappy"
 	fbs "github.com/google/flatbuffers/go"
 	"github.com/outcaste-io/badger/v4/fb"
+	"github.com/outcaste-io/sroar"
 	"github.com/pkg/errors"
 
 	"github.com/outcaste-io/badger/v4/options"
@@ -94,6 +95,10 @@ type Builder struct {
 	wg        sync.WaitGroup
 	blockChan chan *bblock
 	blockList []*bblock
+
+	// Keep track of the last key and the last value. Only output if a different key comes.
+	lastKey []byte
+	lastBm  *sroar.Bitmap
 }
 
 func (b *Builder) allocate(need int) []byte {
@@ -341,8 +346,17 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) {
 	b.addInternal(key, value, false)
 }
 
-func (b *Builder) addInternal(key []byte, value y.ValueStruct, isStale bool) {
-	if b.shouldFinishBlock(key, value) {
+func (b *Builder) addInternal(key []byte, vs y.ValueStruct, isStale bool) {
+	addLastKeyIfValid := func() {
+		if b.lastBm.GetCardinality() > 0 {
+			vs := y.ValueStruct{Meta: y.BitRoar, Value: b.lastBm.ToBuffer()}
+			b.addHelper(b.lastKey, vs)
+		}
+		b.lastKey, b.lastBm = nil, nil
+	}
+
+	if b.shouldFinishBlock(key, vs) {
+		addLastKeyIfValid()
 		if isStale {
 			// This key will be added to tableIndex and it is stale.
 			b.staleDataSize += len(key) + 4 /* len */ + 4 /* offset */
@@ -353,7 +367,38 @@ func (b *Builder) addInternal(key []byte, value y.ValueStruct, isStale bool) {
 			data: b.alloc.Allocate(b.opts.BlockSize + padding),
 		}
 	}
-	b.addHelper(key, value)
+
+	// Check if this key matches last key. If they do, this key must have the BitRoar bit set.
+	// If they don't, then, if this key has a BitRoar set, then start a new Bitmap. Update
+	// lastKey to this.
+	// Otherwise, treat the key as normal, and zero out lastKey.
+	// In both cases, flush out lastKey.
+	version := y.ParseTs(key)
+	if y.SameKey(key, b.lastKey) {
+		if len(vs.Value) > 0 {
+			b.lastBm.Or(sroar.FromBuffer(vs.Value))
+		} else {
+			b.lastBm.Set(version)
+		}
+		return
+	}
+
+	addLastKeyIfValid() // We got a new key.
+	if vs.Meta&y.BitRoar > 0 {
+		b.lastKey = y.Copy(key)
+
+		var bm *sroar.Bitmap
+		if len(vs.Value) > 0 {
+			bm = sroar.FromBufferWithCopy(vs.Value)
+		} else {
+			bm = sroar.NewBitmap()
+			bm.Set(version)
+		}
+		b.lastBm = bm
+		return // No need to add this key to builder yet.
+	}
+
+	b.addHelper(key, vs)
 }
 
 // TODO: vvv this was the comment on ReachedCapacity.
