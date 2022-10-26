@@ -303,7 +303,7 @@ func (b *Builder) finishBlock() {
 	}
 }
 
-func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
+func (b *Builder) shouldFinishBlock(newSz uint32) bool {
 	// If there is no entry till now, we will return false.
 	if len(b.curBlock.entryOffsets) <= 0 {
 		return false
@@ -317,7 +317,7 @@ func (b *Builder) shouldFinishBlock(key []byte, value y.ValueStruct) bool {
 		8 + // Sum64 in checksum proto
 		4) // checksum length
 	estimatedSize := uint32(b.curBlock.end) + uint32(6 /*header size for entry*/) +
-		uint32(len(key)) + uint32(value.EncodedSize()) + entriesOffsetsSize
+		newSz + entriesOffsetsSize
 
 	if b.shouldEncrypt() {
 		// IV is added at the end of the block, while encrypting.
@@ -355,7 +355,12 @@ func (b *Builder) addInternal(key []byte, vs y.ValueStruct, isStale bool) {
 		b.lastKey, b.lastBm = nil, nil
 	}
 
-	if b.shouldFinishBlock(key, vs) {
+	estSz := uint32(len(key)) + uint32(vs.EncodedSize())
+	if b.lastBm.GetCardinality() > 0 {
+		// shouldFinishBlock should consider the lastKey and lastBm.
+		estSz += uint32(len(b.lastKey) + len(b.lastBm.ToBuffer()) + 2)
+	}
+	if b.shouldFinishBlock(estSz) {
 		addLastKeyIfValid()
 		if isStale {
 			// This key will be added to tableIndex and it is stale.
