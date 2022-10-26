@@ -54,6 +54,9 @@ const (
 	Sync Flags = 1 << iota
 	// ReadOnly opens the underlying file on a read-only basis.
 	ReadOnly
+
+	// Rest of the bits are in db.go
+	BitRoar byte = 1 << 3 // Set if the key is a bitmap key.
 )
 
 var (

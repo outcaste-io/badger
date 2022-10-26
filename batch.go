@@ -151,6 +151,12 @@ func (wb *WriteBatch) SetAt(k []byte, v []byte, ts uint64) error {
 	return wb.SetEntry(&e)
 }
 
+// SetAt sets key at given ts.
+func (wb *WriteBatch) SetBitmap(k []byte, ts uint64) error {
+	e := Entry{Key: k, meta: y.BitRoar, version: ts}
+	return wb.SetEntry(&e)
+}
+
 // DeleteAt is equivalent of Txn.Delete but accepts a delete timestamp.
 func (wb *WriteBatch) DeleteAt(k []byte, ts uint64) error {
 	e := Entry{Key: k, meta: bitDelete, version: ts}
