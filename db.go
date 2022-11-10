@@ -397,6 +397,14 @@ func (db *DB) initBannedNamespaces() error {
 	})
 }
 
+func maxUint64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// MaxVersion doesn't memtables into account.
 func (db *DB) MaxVersion() uint64 {
 	var maxVersion uint64
 	update := func(a uint64) {
@@ -414,7 +422,45 @@ func (db *DB) MaxVersion() uint64 {
 	}
 	db.lock.Unlock()
 	for _, ti := range db.Tables() {
-		update(ti.MaxVersion)
+		maxVersion = maxUint64(maxVersion, ti.MaxVersion)
+	}
+	return maxVersion
+}
+
+// MaxVersionForPrefix doesn't take memtables into account.
+func (db *DB) MaxVersionForPrefix(prefix []byte) uint64 {
+	opts := DefaultIteratorOptions
+	opts.Prefix = prefix
+	tableMatrix := db.lc.getTables(&opts)
+	defer func() {
+		for _, tables := range tableMatrix {
+			for _, t := range tables {
+				_ = t.DecrRef()
+			}
+		}
+	}()
+	y.AssertTrue(len(tableMatrix) == db.opt.MaxLevels)
+
+	pk := y.KeyWithTs(prefix, math.MaxUint64)
+	var maxVersion uint64
+	for _, level := range tableMatrix {
+		for _, tbl := range level {
+			if tbl.CoveredByPrefix(prefix) {
+				maxVersion = maxUint64(maxVersion, tbl.MaxVersion())
+				continue
+			}
+			// The table doesn't fully overlap. So, we need to iterate over the
+			// entries to find the maxVersion.
+			itr := tbl.NewIterator(table.NOCACHE)
+			for itr.Seek(pk); itr.Valid(); itr.Next() {
+				if !bytes.HasPrefix(itr.Key(), prefix) {
+					break
+				}
+				ts := y.ParseTs(itr.Key())
+				maxVersion = maxUint64(maxVersion, ts)
+			}
+			itr.Close()
+		}
 	}
 	return maxVersion
 }
@@ -900,7 +946,8 @@ func (db *DB) doWrites(lc *z.Closer) {
 
 // batchSet applies a list of badger.Entry. If a request level error occurs it
 // will be returned.
-//   Check(kv.BatchSet(entries))
+//
+//	Check(kv.BatchSet(entries))
 func (db *DB) batchSet(entries []*Entry) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
@@ -913,9 +960,10 @@ func (db *DB) batchSet(entries []*Entry) error {
 // batchSetAsync is the asynchronous version of batchSet. It accepts a callback
 // function which is called when all the sets are complete. If a request level
 // error occurs, it will be passed back via the callback.
-//   err := kv.BatchSetAsync(entries, func(err error)) {
-//      Check(err)
-//   }
+//
+//	err := kv.BatchSetAsync(entries, func(err error)) {
+//	   Check(err)
+//	}
 func (db *DB) batchSetAsync(entries []*Entry, f func(error)) error {
 	req, err := db.sendToWriteCh(entries)
 	if err != nil {
@@ -1867,16 +1915,16 @@ func (db *DB) DropPrefix(prefixes ...[]byte) error {
 }
 
 // DropPrefix would drop all the keys with the provided prefix. It does this in the following way:
-// - Stop accepting new writes.
-// - Stop memtable flushes before acquiring lock. Because we're acquring lock here
-//   and memtable flush stalls for lock, which leads to deadlock
-// - Flush out all memtables, skipping over keys with the given prefix, Kp.
-// - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
-//   back after a restart.
-// - Stop compaction.
-// - Compact L0->L1, skipping over Kp.
-// - Compact rest of the levels, Li->Li, picking tables which have Kp.
-// - Resume memtable flushes, compactions and writes.
+//   - Stop accepting new writes.
+//   - Stop memtable flushes before acquiring lock. Because we're acquring lock here
+//     and memtable flush stalls for lock, which leads to deadlock
+//   - Flush out all memtables, skipping over keys with the given prefix, Kp.
+//   - Write out the value log header to memtables when flushing, so we don't accidentally bring Kp
+//     back after a restart.
+//   - Stop compaction.
+//   - Compact L0->L1, skipping over Kp.
+//   - Compact rest of the levels, Li->Li, picking tables which have Kp.
+//   - Resume memtable flushes, compactions and writes.
 func (db *DB) DropPrefixBlocking(prefixes ...[]byte) error {
 	if len(prefixes) == 0 {
 		return nil

@@ -547,6 +547,56 @@ func TestTxnReadTs(t *testing.T) {
 	require.Equal(t, 1, int(db.orc.readTs()))
 }
 
+// This test is failing currently because we're returning version+1 from MaxVersion()
+func TestMaxVersionForPrefix(t *testing.T) {
+	N := 10000
+	t.Run("Managed mode", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		db, err := Open(opt)
+		require.NoError(t, err)
+
+		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
+		// This will create commits from 1 to N.
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("a-%d", i))}, uint64(1))
+		}
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("b-%d", i))}, uint64(i+100))
+		}
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i))
+		}
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("c-%d", i))}, uint64(i+10))
+		}
+		require.NoError(t, wb.Flush())
+		require.NoError(t, db.Close())
+
+		db, err = Open(opt)
+		require.NoError(t, err)
+
+		ver := db.MaxVersion()
+		require.Equal(t, N+100, int(ver))
+
+		ver = db.MaxVersionForPrefix([]byte("a-"))
+		require.Equal(t, 1, int(ver))
+
+		ver = db.MaxVersionForPrefix([]byte("b-"))
+		require.Equal(t, N+100, int(ver))
+
+		ver = db.MaxVersionForPrefix([]byte("c-"))
+		require.Equal(t, N+10, int(ver))
+
+		require.NoError(t, db.Close())
+	})
+}
+
 // This tests failed for stream writer with jemalloc and compression enabled.
 func TestKeyCount(t *testing.T) {
 	if !*manual {
