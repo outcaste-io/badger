@@ -113,7 +113,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		if err := printInfo(sstDir); err != nil {
 			return y.Wrap(err, "failed to print information in MANIFEST file")
 		}
-		return
+		return nil
 	}
 
 	// Open DB
