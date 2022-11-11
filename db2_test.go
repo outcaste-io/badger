@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/outcaste-io/badger/v4/options"
+	"github.com/outcaste-io/sroar"
 	"github.com/pkg/errors"
 
 	"github.com/outcaste-io/badger/v4/pb"
@@ -398,6 +399,87 @@ func TestMaxVersion(t *testing.T) {
 		require.Equal(t, N, int(ver))
 
 		require.NoError(t, db.Close())
+	})
+}
+
+func TestBitmap(t *testing.T) {
+	key1 := []byte("bm1")
+	key2 := []byte("bm2")
+	key3 := []byte("no3")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatch()
+
+		N := uint64(1000)
+		for i := uint64(1); i <= N; i++ {
+			err := wb.SetBitmap(key1, 2*i)
+			require.NoError(t, err)
+
+			err = wb.SetBitmap(key2, i)
+			require.NoError(t, err)
+
+			err = wb.SetAt(key3, key3, i)
+			require.NoError(t, err)
+		}
+		require.NoError(t, wb.Flush())
+
+		bm1, err := db.GetBitmap(key1)
+		require.NoError(t, err)
+
+		for idx, val := range bm1.ToArray() {
+			require.Equal(t, 2*uint64(idx+1), val)
+		}
+		require.Equal(t, int(N), bm1.GetCardinality())
+
+		bm2, err := db.GetBitmap(key2)
+		require.NoError(t, err)
+		for idx, val := range bm2.ToArray() {
+			require.Equal(t, uint64(idx+1), val)
+		}
+		require.Equal(t, int(N), bm2.GetCardinality())
+
+		err = db.View(func(txn *Txn) error {
+			iopts := DefaultIteratorOptions
+			itr := txn.NewKeyIterator(key3, iopts)
+			defer itr.Close()
+
+			version := uint64(N)
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, key3, item.Key())
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, key3, val)
+				require.Equal(t, version, item.Version())
+				version--
+			}
+			require.Equal(t, uint64(0), version)
+			return nil
+		})
+		require.NoError(t, err)
+
+		// Print out all keys
+		err = db.View(func(txn *Txn) error {
+			iopts := DefaultIteratorOptions
+			iopts.AllVersions = true
+			itr := txn.NewIterator(iopts)
+			defer itr.Close()
+
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				if !bytes.HasPrefix(item.Key(), []byte("bm")) {
+					continue
+				}
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+
+				bm := sroar.FromBuffer(val)
+				t.Logf("key: %s | value card: %d sz: %d | version: %d\n",
+					item.Key(), bm.GetCardinality(), len(val), item.Version())
+				t.Logf("bm:%s\n\n", bm.String())
+			}
+			return nil
+		})
+		require.NoError(t, err)
 	})
 }
 
