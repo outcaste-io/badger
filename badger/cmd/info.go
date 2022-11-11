@@ -35,6 +35,7 @@ import (
 	"github.com/outcaste-io/badger/v4/options"
 	"github.com/outcaste-io/badger/v4/table"
 	"github.com/outcaste-io/badger/v4/y"
+	"github.com/outcaste-io/sroar"
 	"github.com/spf13/cobra"
 )
 
@@ -242,7 +243,12 @@ func printKey(item *badger.Item, showValue bool) error {
 			return y.Wrapf(err,
 				"failed to copy value of the key: %x(%d)", item.Key(), item.Version())
 		}
-		fmt.Fprintf(&buf, "\n\tvalue: %v", val)
+		if item.IsBitmap() {
+			bm := sroar.FromBuffer(val)
+			fmt.Fprintf(&buf, "\n\t bitmap: %s\n", bm.String())
+		} else {
+			fmt.Fprintf(&buf, "\n\tvalue: %v", val)
+		}
 	}
 	fmt.Println(buf.String())
 	return nil
