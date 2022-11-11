@@ -267,7 +267,7 @@ type IteratorOptions struct {
 	PrefetchSize int
 	// PrefetchValues Indicates whether we should prefetch values during
 	// iteration and store them.
-	PrefetchValues bool
+	PrefetchValues bool // TODO: Remove PrefetchValues. It no longer serves any purpose.
 	Reverse        bool // Direction of iteration. False is forward, true is backward.
 	AllVersions    bool // Fetch all valid versions of the same key.
 	InternalAccess bool // Used to allow internal access to badger keys.

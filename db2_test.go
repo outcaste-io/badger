@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/outcaste-io/badger/v3/options"
+	"github.com/outcaste-io/sroar"
 	"github.com/pkg/errors"
 
 	"github.com/outcaste-io/badger/v3/pb"
@@ -547,56 +548,6 @@ func TestTxnReadTs(t *testing.T) {
 	require.Equal(t, 1, int(db.orc.readTs()))
 }
 
-// This test is failing currently because we're returning version+1 from MaxVersion()
-func TestMaxVersionForPrefix(t *testing.T) {
-	N := 10000
-	t.Run("Managed mode", func(t *testing.T) {
-		dir, err := ioutil.TempDir("", "badger-test")
-		require.NoError(t, err)
-		defer removeDir(dir)
-
-		opt := getTestOptions(dir)
-		db, err := Open(opt)
-		require.NoError(t, err)
-
-		wb := db.NewWriteBatch()
-		defer wb.Cancel()
-
-		// This will create commits from 1 to N.
-		for i := 1; i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("a-%d", i))}, uint64(1))
-		}
-		for i := 1; i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("b-%d", i))}, uint64(i+100))
-		}
-		for i := 1; i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i))
-		}
-		for i := 1; i <= N; i++ {
-			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("c-%d", i))}, uint64(i+10))
-		}
-		require.NoError(t, wb.Flush())
-		require.NoError(t, db.Close())
-
-		db, err = Open(opt)
-		require.NoError(t, err)
-
-		ver := db.MaxVersion()
-		require.Equal(t, N+100, int(ver))
-
-		ver = db.MaxVersionForPrefix([]byte("a-"))
-		require.Equal(t, 1, int(ver))
-
-		ver = db.MaxVersionForPrefix([]byte("b-"))
-		require.Equal(t, N+100, int(ver))
-
-		ver = db.MaxVersionForPrefix([]byte("c-"))
-		require.Equal(t, N+10, int(ver))
-
-		require.NoError(t, db.Close())
-	})
-}
-
 // This tests failed for stream writer with jemalloc and compression enabled.
 func TestKeyCount(t *testing.T) {
 	if !*manual {
@@ -812,4 +763,135 @@ func TestDropPrefixNonBlockingNoError(t *testing.T) {
 	prefixes := [][]byte{[]byte("aa")}
 	require.NoError(t, db.DropPrefixNonBlocking(prefixes...))
 	closer2.SignalAndWait()
+}
+
+func TestBitmap(t *testing.T) {
+	key1 := []byte("bm1")
+	key2 := []byte("bm2")
+	key3 := []byte("no3")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatch()
+
+		N := uint64(1000)
+		for i := uint64(1); i <= N; i++ {
+			err := wb.SetBitmap(key1, 2*i)
+			require.NoError(t, err)
+
+			err = wb.SetBitmap(key2, i)
+			require.NoError(t, err)
+
+			err = wb.SetAt(key3, key3, i)
+			require.NoError(t, err)
+		}
+		require.NoError(t, wb.Flush())
+
+		bm1, err := db.GetBitmap(key1)
+		require.NoError(t, err)
+
+		for idx, val := range bm1.ToArray() {
+			require.Equal(t, 2*uint64(idx+1), val)
+		}
+		require.Equal(t, int(N), bm1.GetCardinality())
+
+		bm2, err := db.GetBitmap(key2)
+		require.NoError(t, err)
+		for idx, val := range bm2.ToArray() {
+			require.Equal(t, uint64(idx+1), val)
+		}
+		require.Equal(t, int(N), bm2.GetCardinality())
+
+		err = db.View(func(txn *Txn) error {
+			iopts := DefaultIteratorOptions
+			itr := txn.NewKeyIterator(key3, iopts)
+			defer itr.Close()
+
+			version := uint64(N)
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, key3, item.Key())
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, key3, val)
+				require.Equal(t, version, item.Version())
+				version--
+			}
+			require.Equal(t, uint64(0), version)
+			return nil
+		})
+		require.NoError(t, err)
+
+		// Print out all keys
+		err = db.View(func(txn *Txn) error {
+			iopts := DefaultIteratorOptions
+			iopts.AllVersions = true
+			itr := txn.NewIterator(iopts)
+			defer itr.Close()
+
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				if !bytes.HasPrefix(item.Key(), []byte("bm")) {
+					continue
+				}
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+
+				bm := sroar.FromBuffer(val)
+				t.Logf("key: %s | value card: %d sz: %d | version: %d\n",
+					item.Key(), bm.GetCardinality(), len(val), item.Version())
+				t.Logf("bm:%s\n\n", bm.String())
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
+// This test is failing currently because we're returning version+1 from MaxVersion()
+func TestMaxVersionForPrefix(t *testing.T) {
+	N := 10000
+	t.Run("Managed mode", func(t *testing.T) {
+		dir, err := ioutil.TempDir("", "badger-test")
+		require.NoError(t, err)
+		defer removeDir(dir)
+
+		opt := getTestOptions(dir)
+		db, err := Open(opt)
+		require.NoError(t, err)
+
+		wb := db.NewWriteBatch()
+		defer wb.Cancel()
+
+		// This will create commits from 1 to N.
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("a-%d", i))}, uint64(1))
+		}
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("b-%d", i))}, uint64(i+100))
+		}
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("%d", i))}, uint64(i))
+		}
+		for i := 1; i <= N; i++ {
+			wb.SetEntryAt(&Entry{Key: []byte(fmt.Sprintf("c-%d", i))}, uint64(i+10))
+		}
+		require.NoError(t, wb.Flush())
+		require.NoError(t, db.Close())
+
+		db, err = Open(opt)
+		require.NoError(t, err)
+
+		ver := db.MaxVersion()
+		require.Equal(t, N+100, int(ver))
+
+		ver = db.MaxVersionForPrefix([]byte("a-"))
+		require.Equal(t, 1, int(ver))
+
+		ver = db.MaxVersionForPrefix([]byte("b-"))
+		require.Equal(t, N+100, int(ver))
+
+		ver = db.MaxVersionForPrefix([]byte("c-"))
+		require.Equal(t, N+10, int(ver))
+
+		require.NoError(t, db.Close())
+	})
 }

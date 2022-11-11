@@ -27,7 +27,9 @@ import (
 	"sync/atomic"
 
 	"github.com/outcaste-io/badger/v3/y"
+	"github.com/outcaste-io/badger/v4/y"
 	"github.com/outcaste-io/ristretto/z"
+	"github.com/outcaste-io/sroar"
 	"github.com/pkg/errors"
 )
 
@@ -780,9 +782,9 @@ func (txn *Txn) Discarded() bool {
 // to. Commit API internally runs Discard, but running it twice wouldn't cause
 // any issues.
 //
-//  txn := db.NewTransaction(false)
-//  defer txn.Discard()
-//  // Call various APIs.
+//	txn := db.NewTransaction(false)
+//	defer txn.Discard()
+//	// Call various APIs.
 func (db *DB) NewTransaction(update bool) *Txn {
 	return db.newTransaction(update, false)
 }
@@ -847,4 +849,43 @@ func (db *DB) Update(fn func(txn *Txn) error) error {
 	}
 
 	return txn.Commit()
+}
+
+func (db *DB) GetBitmap(key []byte) (*sroar.Bitmap, error) {
+	var bm *sroar.Bitmap
+	err := db.View(func(txn *Txn) error {
+		itrOpts := IteratorOptions{
+			PrefetchValues: false,
+			Reverse:        false,
+			AllVersions:    true,
+		}
+		itr := txn.NewKeyIterator(key, itrOpts)
+		defer itr.Close()
+
+		for itr.Rewind(); itr.Valid(); itr.Next() {
+			item := itr.Item()
+			if err := item.Value(func(val []byte) error {
+				if bm == nil {
+					if len(val) > 0 {
+						bm = sroar.FromBufferWithCopy(val)
+					} else {
+						bm = sroar.NewBitmap()
+						bm.Set(item.Version())
+					}
+					return nil
+				}
+				if len(val) > 0 {
+					bm2 := sroar.FromBuffer(val)
+					bm.Or(bm2)
+				} else {
+					bm.Set(item.Version())
+				}
+				return nil
+			}); err != nil {
+				return errors.Wrapf(err, "while fetching value")
+			}
+		}
+		return nil
+	})
+	return bm, err
 }
