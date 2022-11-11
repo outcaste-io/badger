@@ -246,6 +246,8 @@ func printKey(item *badger.Item, showValue bool) error {
 		if item.IsBitmap() {
 			bm := sroar.FromBuffer(val)
 			fmt.Fprintf(&buf, "\n\t bitmap: %s\n", bm.String())
+			bm.Cleanup()
+			fmt.Fprintf(&buf, "\n\t after cleanup bitmap: %s\n", bm.String())
 		} else {
 			fmt.Fprintf(&buf, "\n\tvalue: %v", val)
 		}
