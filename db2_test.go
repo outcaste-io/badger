@@ -405,7 +405,8 @@ func TestMaxVersion(t *testing.T) {
 func TestBitmap(t *testing.T) {
 	key1 := []byte("bm1")
 	key2 := []byte("bm2")
-	key3 := []byte("no3")
+	key3 := []byte("bm3")
+	noKey := []byte("no3")
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
 
@@ -417,9 +418,15 @@ func TestBitmap(t *testing.T) {
 			err = wb.SetBitmap(key2, i)
 			require.NoError(t, err)
 
-			err = wb.SetAt(key3, key3, i)
+			err = wb.SetAt(noKey, noKey, i)
 			require.NoError(t, err)
 		}
+
+		// Add only 3 keys, quite far apart
+		require.NoError(t, wb.SetBitmap(key3, 100000))
+		require.NoError(t, wb.SetBitmap(key3, 1000000))
+		require.NoError(t, wb.SetBitmap(key3, 10000000))
+
 		require.NoError(t, wb.Flush())
 
 		bm1, err := db.GetBitmap(key1)
@@ -439,16 +446,16 @@ func TestBitmap(t *testing.T) {
 
 		err = db.View(func(txn *Txn) error {
 			iopts := DefaultIteratorOptions
-			itr := txn.NewKeyIterator(key3, iopts)
+			itr := txn.NewKeyIterator(noKey, iopts)
 			defer itr.Close()
 
 			version := uint64(N)
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				require.Equal(t, key3, item.Key())
+				require.Equal(t, noKey, item.Key())
 				val, err := item.ValueCopy(nil)
 				require.NoError(t, err)
-				require.Equal(t, key3, val)
+				require.Equal(t, noKey, val)
 				require.Equal(t, version, item.Version())
 				version--
 			}
