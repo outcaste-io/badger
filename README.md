@@ -1,16 +1,4 @@
 # BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/outcaste-io/badger/v3.svg)](https://pkg.go.dev/github.com/outcaste-io/badger/v3)
-
-**This is a fork of dgraph-io/badger, maintained by the original authors of Badger.**
-
-Core Maintainers (sorted alphabetically):
-
-- https://github.com/ahsanbarkati
-- https://github.com/aman-bansal
-- https://github.com/jarifibrahim
-- https://github.com/manishrjain
-- https://github.com/namanjain8
-- https://github.com/poonai
-
 BadgerDB is an embeddable, persistent and fast key-value (KV) database written
 in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
 fast, distributed graph database. It's meant to be a performant alternative to
