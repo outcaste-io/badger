@@ -1,15 +1,8 @@
 # BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/outcaste-io/badger/v3.svg)](https://pkg.go.dev/github.com/outcaste-io/badger/v3)
 
-**NOTE: This repo is a leaner version of Badger being used by Outserv. It doesn't have Value Log, Write Ahead Log, Write Transactions (only read transactions), and all writes are done via WriteBatch or via HandoverSkiplist.**
+**NOTE: v4 is a leaner version of Badger being used by 0xfast.com . It doesn't have Value Log, Write Ahead Log, Write Transactions (only read transactions), and all writes are done via WriteBatch or via HandoverSkiplist. I (Manish) am maintaining this fork.**
 
-Core Maintainers (sorted alphabetically):
-
-- https://github.com/ahsanbarkati
-- https://github.com/aman-bansal
-- https://github.com/jarifibrahim
-- https://github.com/manishrjain
-- https://github.com/namanjain8
-- https://github.com/poonai
+---
 
 BadgerDB is an embeddable, persistent and fast key-value (KV) database written
 in pure Go. It is the underlying database for [Dgraph](https://dgraph.io), a
