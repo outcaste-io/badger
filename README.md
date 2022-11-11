@@ -1,4 +1,4 @@
-# BadgerDB [![Go Reference](https://pkg.go.dev/badge/github.com/outcaste-io/badger/v3.svg)](https://pkg.go.dev/github.com/outcaste-io/badger/v3)
+# BadgerDB [![Go Reference v4](https://pkg.go.dev/badge/github.com/outcaste-io/badger/v4.svg)](https://pkg.go.dev/github.com/outcaste-io/badger/v4)
 
 **NOTE: v4 is a leaner version of Badger being used by 0xfast.com . It doesn't have Value Log, Write Ahead Log, Write Transactions (only read transactions), and all writes are done via WriteBatch or via HandoverSkiplist. I (Manish) am maintaining this fork.**
 
