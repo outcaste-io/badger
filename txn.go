@@ -158,8 +158,6 @@ func (db *DB) View(fn func(txn *Txn) error) error {
 }
 
 func (db *DB) GetBitmap(key []byte) (*sroar.Bitmap, error) {
-	// TODO: Add a cache as well.
-
 	var bm *sroar.Bitmap
 	err := db.View(func(txn *Txn) error {
 		itrOpts := IteratorOptions{
