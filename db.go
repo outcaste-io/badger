@@ -330,15 +330,56 @@ func (db *DB) initBannedNamespaces() error {
 	})
 }
 
+func maxUint64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// MaxVersion doesn't memtables into account.
 func (db *DB) MaxVersion() uint64 {
 	var maxVersion uint64
-	update := func(a uint64) {
-		if a > maxVersion {
-			maxVersion = a
-		}
-	}
 	for _, ti := range db.Tables() {
-		update(ti.MaxVersion)
+		maxVersion = maxUint64(maxVersion, ti.MaxVersion)
+	}
+	return maxVersion
+}
+
+// MaxVersionForPrefix doesn't take memtables into account.
+func (db *DB) MaxVersionForPrefix(prefix []byte) uint64 {
+	opts := DefaultIteratorOptions
+	opts.Prefix = prefix
+	tableMatrix := db.lc.getTables(&opts)
+	defer func() {
+		for _, tables := range tableMatrix {
+			for _, t := range tables {
+				_ = t.DecrRef()
+			}
+		}
+	}()
+	y.AssertTrue(len(tableMatrix) == db.opt.MaxLevels)
+
+	pk := y.KeyWithTs(prefix, math.MaxUint64)
+	var maxVersion uint64
+	for _, level := range tableMatrix {
+		for _, tbl := range level {
+			if tbl.CoveredByPrefix(prefix) {
+				maxVersion = maxUint64(maxVersion, tbl.MaxVersion())
+				continue
+			}
+			// The table doesn't fully overlap. So, we need to iterate over the
+			// entries to find the maxVersion.
+			itr := tbl.NewIterator(table.NOCACHE)
+			for itr.Seek(pk); itr.Valid(); itr.Next() {
+				if !bytes.HasPrefix(itr.Key(), prefix) {
+					break
+				}
+				ts := y.ParseTs(itr.Key())
+				maxVersion = maxUint64(maxVersion, ts)
+			}
+			itr.Close()
+		}
 	}
 	return maxVersion
 }
