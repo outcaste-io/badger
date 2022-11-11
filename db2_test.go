@@ -401,6 +401,63 @@ func TestMaxVersion(t *testing.T) {
 	})
 }
 
+func TestBitmap(t *testing.T) {
+	key1 := []byte("1")
+	key2 := []byte("2")
+	key3 := []byte("3")
+	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
+		wb := db.NewWriteBatch()
+
+		N := uint64(1000)
+		for i := uint64(1); i <= N; i++ {
+			err := wb.SetBitmap(key1, 2*i)
+			require.NoError(t, err)
+
+			err = wb.SetBitmap(key2, i)
+			require.NoError(t, err)
+
+			err = wb.SetAt(key3, key3, i)
+			require.NoError(t, err)
+		}
+		require.NoError(t, wb.Flush())
+
+		bm1, err := db.GetBitmap(key1)
+		require.NoError(t, err)
+
+		for idx, val := range bm1.ToArray() {
+			require.Equal(t, 2*uint64(idx+1), val)
+		}
+		require.Equal(t, int(N), bm1.GetCardinality())
+
+		bm2, err := db.GetBitmap(key2)
+		require.NoError(t, err)
+		for idx, val := range bm2.ToArray() {
+			require.Equal(t, uint64(idx+1), val)
+		}
+		require.Equal(t, int(N), bm2.GetCardinality())
+
+		err = db.View(func(txn *Txn) error {
+			iopts := DefaultIteratorOptions
+			itr := txn.NewKeyIterator(key3, iopts)
+			defer itr.Close()
+
+			version := uint64(N)
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				require.Equal(t, key3, item.Key())
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+				require.Equal(t, key3, val)
+				require.Equal(t, version, item.Version())
+				version--
+			}
+			require.Equal(t, uint64(0), version)
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}
+
 // This test is failing currently because we're returning version+1 from MaxVersion()
 func TestMaxVersionForPrefix(t *testing.T) {
 	N := 10000
