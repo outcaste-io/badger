@@ -42,6 +42,7 @@ type flagOptions struct {
 	showTables               bool
 	showHistogram            bool
 	showKeys                 bool
+	showManifest             bool
 	withPrefix               string
 	keyLookup                string
 	itemMeta                 bool
@@ -65,6 +66,7 @@ func init() {
 	infoCmd.Flags().BoolVar(&opt.showHistogram, "histogram", false,
 		"Show a histogram of the key and value sizes.")
 	infoCmd.Flags().BoolVar(&opt.showKeys, "show-keys", false, "Show keys stored in Badger")
+	infoCmd.Flags().BoolVar(&opt.showManifest, "show-manifest", false, "Show manifest")
 	infoCmd.Flags().StringVar(&opt.withPrefix, "with-prefix", "",
 		"Consider only the keys with specified prefix")
 	infoCmd.Flags().StringVarP(&opt.keyLookup, "lookup", "l", "", "Hex of the key to lookup")
@@ -107,8 +109,11 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 		WithChecksumVerificationMode(cvMode).
 		WithExternalMagic(opt.externalMagicVersion)
 
-	if err := printInfo(sstDir); err != nil {
-		return y.Wrap(err, "failed to print information in MANIFEST file")
+	if opt.showManifest {
+		if err := printInfo(sstDir); err != nil {
+			return y.Wrap(err, "failed to print information in MANIFEST file")
+		}
+		return
 	}
 
 	// Open DB
@@ -137,6 +142,7 @@ func handleInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(opt.keyLookup) > 0 {
+		fmt.Printf("Looking up key: %s\n", opt.keyLookup)
 		if err := lookup(db); err != nil {
 			return y.Wrapf(err, "failed to perform lookup for the key: %x", opt.keyLookup)
 		}
@@ -220,9 +226,9 @@ func lookup(db *badger.DB) error {
 
 func printKey(item *badger.Item, showValue bool) error {
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "Key: %x\tversion: %d", item.Key(), item.Version())
+	fmt.Fprintf(&buf, item.String())
 	if opt.itemMeta {
-		fmt.Fprintf(&buf, "\tsize: %d\tmeta: b%04b", item.EstimatedSize(), item.UserMeta())
+		fmt.Fprintf(&buf, "\tsize: %d\tuserMeta: b%04b", item.EstimatedSize(), item.UserMeta())
 	}
 	if item.IsDeletedOrExpired() {
 		buf.WriteString("\t{deleted}")
