@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/outcaste-io/badger/v4/options"
+	"github.com/outcaste-io/sroar"
 	"github.com/pkg/errors"
 
 	"github.com/outcaste-io/badger/v4/pb"
@@ -402,9 +403,9 @@ func TestMaxVersion(t *testing.T) {
 }
 
 func TestBitmap(t *testing.T) {
-	key1 := []byte("1")
-	key2 := []byte("2")
-	key3 := []byte("3")
+	key1 := []byte("bm1")
+	key2 := []byte("bm2")
+	key3 := []byte("no3")
 	runBadgerTest(t, nil, func(t *testing.T, db *DB) {
 		wb := db.NewWriteBatch()
 
@@ -452,6 +453,30 @@ func TestBitmap(t *testing.T) {
 				version--
 			}
 			require.Equal(t, uint64(0), version)
+			return nil
+		})
+		require.NoError(t, err)
+
+		// Print out all keys
+		err = db.View(func(txn *Txn) error {
+			iopts := DefaultIteratorOptions
+			iopts.AllVersions = true
+			itr := txn.NewIterator(iopts)
+			defer itr.Close()
+
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				if !bytes.HasPrefix(item.Key(), []byte("bm")) {
+					continue
+				}
+				val, err := item.ValueCopy(nil)
+				require.NoError(t, err)
+
+				bm := sroar.FromBuffer(val)
+				t.Logf("key: %s | value card: %d sz: %d | version: %d\n",
+					item.Key(), bm.GetCardinality(), len(val), item.Version())
+				t.Logf("bm:%s\n\n", bm.String())
+			}
 			return nil
 		})
 		require.NoError(t, err)
