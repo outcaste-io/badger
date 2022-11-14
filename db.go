@@ -121,6 +121,8 @@ type DB struct {
 	blockCache *ristretto.Cache
 	indexCache *ristretto.Cache
 	allocPool  *z.AllocatorPool
+
+	lf *LifetimeStats
 }
 
 func checkAndSetOptions(opt *Options) error {
@@ -204,6 +206,7 @@ func Open(opt Options) (*DB, error) {
 		pub:              newPublisher(),
 		allocPool:        z.NewAllocatorPool(8),
 		bannedNamespaces: &lockedKeys{keys: make(map[uint64]struct{})},
+		lf:               InitLifetimeStats(filepath.Join(opt.Dir, "STATS")),
 	}
 	// Cleanup all the goroutines started by badger in case of an error.
 	defer func() {
@@ -663,6 +666,9 @@ var errNoRoom = errors.New("No room for write")
 
 type isLocked struct{}
 
+const idxBytesByUser = 129
+const idxBytesWritten = 130
+
 func (db *DB) handoverSkiplist(r *handoverRequest, _ isLocked) error {
 	sl, callback := r.skl, r.callback
 	req := &request{
@@ -672,6 +678,7 @@ func (db *DB) handoverSkiplist(r *handoverRequest, _ isLocked) error {
 
 	select {
 	case db.flushChan <- flushTask{sl: sl, cb: callback}:
+		db.lf.UpdateAt(idxBytesByUser, uint64(sl.MemSize()))
 		db.imm = append(db.imm, sl)
 		db.pub.sendUpdates(reqs)
 		return nil
@@ -927,6 +934,10 @@ func (db *DB) Tables() []TableInfo {
 	return db.lc.getTableInfo()
 }
 
+func (db *DB) LifetimeStats() map[int]uint64 {
+	return db.lf.Stats()
+}
+
 // Levels gets the LevelInfo.
 func (db *DB) Levels() []LevelInfo {
 	return db.lc.getLevelInfo()
@@ -1110,7 +1121,6 @@ func (db *DB) startMemoryFlush() {
 // stopped. Ideally, no writes are going on during Flatten. Otherwise, it would create competition
 // between flattening the tree and new tables being created at level zero.
 func (db *DB) Flatten(workers int) error {
-
 	db.stopCompactions()
 	defer db.startCompactions()
 
