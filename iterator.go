@@ -140,6 +140,10 @@ func (item *Item) IsDeletedOrExpired() bool {
 	return isDeletedOrExpired(item.meta)
 }
 
+func (item *Item) IsBitmap() bool {
+	return item.meta&y.BitRoar > 0
+}
+
 // DiscardEarlierVersions returns whether the item was created with the
 // option to discard earlier versions of a key when multiple are available.
 func (item *Item) DiscardEarlierVersions() bool {

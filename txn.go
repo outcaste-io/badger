@@ -170,6 +170,9 @@ func (db *DB) GetBitmap(key []byte) (*sroar.Bitmap, error) {
 
 		for itr.Rewind(); itr.Valid(); itr.Next() {
 			item := itr.Item()
+			if item.meta&y.BitRoar == 0 {
+				continue
+			}
 			if err := item.Value(func(val []byte) error {
 				if bm == nil {
 					if len(val) > 0 {

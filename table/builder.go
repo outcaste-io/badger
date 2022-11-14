@@ -346,22 +346,47 @@ func (b *Builder) Add(key []byte, value y.ValueStruct) {
 	b.addInternal(key, value, false)
 }
 
-func (b *Builder) addInternal(key []byte, vs y.ValueStruct, isStale bool) {
-	addLastKeyIfValid := func() {
-		if b.lastBm.GetCardinality() > 0 {
-			vs := y.ValueStruct{Meta: y.BitRoar, Value: b.lastBm.ToBuffer()}
-			b.addHelper(b.lastKey, vs)
-		}
+func (b *Builder) addLastKeyIfValid() {
+	defer func() {
 		b.lastKey, b.lastBm = nil, nil
+	}()
+
+	card := b.lastBm.GetCardinality()
+	if card == 0 {
+		return
+	}
+	ratio := float64(len(b.lastBm.ToBuffer())) / float64(card)
+	if ratio < 8.0 {
+		vs := y.ValueStruct{Meta: y.BitRoar, Value: b.lastBm.ToBuffer()}
+		b.addHelper(b.lastKey, vs)
+		return
 	}
 
+	// We're using more than 8 bytes per uint64. So, just store the keys
+	// directly, without putting them into a Bitmap.
+	arr := b.lastBm.ToArray()
+	keyNoTs := y.ParseKey(b.lastKey)
+
+	// Add in reverse order, because the keys are stored with the
+	// highest timestamp first.
+	for i := len(arr) - 1; i >= 0; i-- {
+		key := y.KeyWithTs(keyNoTs, arr[i])
+		vs := y.ValueStruct{Meta: y.BitRoar}
+		b.addHelper(key, vs)
+	}
+	return
+}
+
+// addInternal is more complex because it's handling the merging and creation of
+// bitmap. For normal keys, the logic is pretty straightforward.
+func (b *Builder) addInternal(key []byte, vs y.ValueStruct, isStale bool) {
 	estSz := uint32(len(key)) + uint32(vs.EncodedSize())
 	if b.lastBm.GetCardinality() > 0 {
 		// shouldFinishBlock should consider the lastKey and lastBm.
 		estSz += uint32(len(b.lastKey) + len(b.lastBm.ToBuffer()) + 2)
 	}
 	if b.shouldFinishBlock(estSz) {
-		addLastKeyIfValid()
+		b.addLastKeyIfValid()
 		if isStale {
 			// This key will be added to tableIndex and it is stale.
 			b.staleDataSize += len(key) + 4 /* len */ + 4 /* offset */
@@ -388,7 +413,7 @@ func (b *Builder) addInternal(key []byte, vs y.ValueStruct, isStale bool) {
 		return
 	}
 
-	addLastKeyIfValid() // We got a new key.
+	b.addLastKeyIfValid() // We got a new key.
 	if vs.Meta&y.BitRoar > 0 {
 		b.lastKey = y.Copy(key)
 
