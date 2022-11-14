@@ -60,6 +60,8 @@ github.com/outcaste-io/ristretto v0.1.1-0.20220404170646-118eb5c81eac h1:h2Sky+P
 github.com/outcaste-io/ristretto v0.1.1-0.20220404170646-118eb5c81eac/go.mod h1:LWEAKsXjquNJfHEtD/qDRdAQa5JV+F2gNMfIOZSEkuk=
 github.com/outcaste-io/sroar v0.0.0-20220425202201-32ae257f7410 h1:Hvk+ccd8cG2n2kxAvQ19oXqWYJ3buUAR3g5OXpeBBAE=
 github.com/outcaste-io/sroar v0.0.0-20220425202201-32ae257f7410/go.mod h1:qi6NCnRugS99q0RMa0E8JU5wAUePskKM1xmHwArCwew=
+github.com/outcaste-io/sroar v0.0.0-20221114214615-697d5538e564 h1:KfOq9+1GGXbFH+5zIELRxYVL80ofFGXXKZojjAKMfnU=
+github.com/outcaste-io/sroar v0.0.0-20221114214615-697d5538e564/go.mod h1:qi6NCnRugS99q0RMa0E8JU5wAUePskKM1xmHwArCwew=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/philhofer/fwd v1.0.0/go.mod h1:gk3iGcWd9+svBvR0sR+KPcfE+RNWozjowpeBVG3ZVNU=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
