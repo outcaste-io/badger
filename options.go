@@ -127,8 +127,8 @@ func DefaultOptions(path string) Options {
 		Dir: path,
 
 		MemTableSize:        64 << 20,
-		BaseTableSize:       2 << 20,
-		BaseLevelSize:       10 << 20,
+		BaseTableSize:       8 << 20,
+		BaseLevelSize:       256 << 20,
 		TableSizeMultiplier: 2,
 		LevelSizeMultiplier: 10,
 		MaxLevels:           7,
