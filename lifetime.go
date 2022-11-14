@@ -35,7 +35,7 @@ func InitLifetimeStats(path string) *LifetimeStats {
 	y.Check(err)
 
 	lf := &LifetimeStats{mf: mf}
-	lf.UpdateAt(idxOpen, 1)
+	lf.updateAt(idxOpen, 1)
 	return lf
 }
 
@@ -73,8 +73,11 @@ func (lf *LifetimeStats) UpdateAt(idx int, delta uint64) {
 }
 
 func (lf *LifetimeStats) Close() error {
-	lf.UpdateAt(idxClose, 1)
-	return lf.mf.Close(0)
+	lf.Lock()
+	defer lf.Unlock()
+
+	lf.updateAt(idxClose, 1)
+	return lf.mf.Close(-1)
 }
 
 func (lf *LifetimeStats) Stats() map[int]uint64 {

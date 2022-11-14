@@ -540,6 +540,9 @@ func (db *DB) close() (err error) {
 	if registryErr := db.registry.Close(); err == nil {
 		err = y.Wrap(registryErr, "DB.Close")
 	}
+	if lfErr := db.lf.Close(); err == nil {
+		err = y.Wrap(lfErr, "DB.Close")
+	}
 
 	// Fsync directories to ensure that lock file, and any other removed files whose directory
 	// we haven't specifically fsynced, are guaranteed to have their directory entry removal
