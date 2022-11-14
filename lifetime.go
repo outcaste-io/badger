@@ -24,7 +24,7 @@ var (
 )
 
 func InitLifetimeStats(path string) *LifetimeStats {
-	mf, err := z.OpenMmapFile(path, os.O_RDWR, maxSz)
+	mf, err := z.OpenMmapFile(path, os.O_RDWR|os.O_CREATE, maxSz)
 	if err == z.NewFile {
 		for i := range mf.Data {
 			mf.Data[i] = 0x0
