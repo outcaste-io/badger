@@ -1399,7 +1399,6 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 
 	// Table should never be moved directly between levels, always be rewritten to allow discarding
 	// invalid versions.
-
 	newTables, decr, err := s.compactBuildTables(l, cd)
 	if err != nil {
 		return err
@@ -1410,6 +1409,13 @@ func (s *levelsController) runCompactDef(id, l int, cd compactDef) (err error) {
 			err = decErr
 		}
 	}()
+
+	var written uint64
+	for _, t := range newTables {
+		written += uint64(t.UncompressedSize())
+	}
+	s.kv.lf.UpdateAt(idxBytesWritten, written)
+
 	changeSet := buildChangeSet(&cd, newTables)
 
 	// We write to the manifest _before_ we delete files (and after we created files)

@@ -13,7 +13,7 @@ require (
 	github.com/klauspost/compress v1.14.3
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/outcaste-io/ristretto v0.1.1-0.20220404170646-118eb5c81eac
-	github.com/outcaste-io/sroar v0.0.0-20220425202201-32ae257f7410 // indirect
+	github.com/outcaste-io/sroar v0.0.0-20221114214615-697d5538e564 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.7.0
