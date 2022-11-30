@@ -1211,6 +1211,16 @@ func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 // cstatus to inf, so no other L0 -> Lbase compactions can happen.
 // Thus, L0 -> L0 must finish for the next L0 -> Lbase to begin.
 func (s *levelsController) fillTablesL0(cd *compactDef) bool {
+	opt := s.kv.opt
+	minSize := int64(opt.NumLevelZeroTables) * opt.MemTableSize
+	l0 := s.levels[0]
+	if l0.getTotalSize() < minSize {
+		// If we have really small tables, then no point merging them with base
+		// level. Instead, just merge them with each other, until we have a
+		// minimum size. Even if we can't run an L0 -> L0 compaction, just let
+		// it be, don't merge with Lbase.
+		return s.fillTablesL0ToL0(cd)
+	}
 	if ok := s.fillTablesL0ToLbase(cd); ok {
 		return true
 	}

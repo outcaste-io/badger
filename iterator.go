@@ -57,7 +57,7 @@ type Item struct {
 
 // String returns a string representation of Item
 func (item *Item) String() string {
-	return fmt.Sprintf("key=%q, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
+	return fmt.Sprintf("key=%x, version=%d, meta=%x", item.Key(), item.Version(), item.meta)
 }
 
 // Key returns the key.
