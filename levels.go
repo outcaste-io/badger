@@ -1112,16 +1112,18 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 
 	top := cd.thisLevel.tables
 	var out []*table.Table
-	now := time.Now()
+	// now := time.Now()
+
+	maxSz := int64(float64(cd.t.fileSz[0]) * 0.9)
 	for _, t := range top {
-		if t.Size() >= 2*cd.t.fileSz[0] {
+		if t.Size() >= maxSz {
 			// This file is already big, don't include it.
 			continue
 		}
-		if now.Sub(t.CreatedAt) < 10*time.Second {
-			// Just created it 10s ago. Don't pick for compaction.
-			continue
-		}
+		// if now.Sub(t.CreatedAt) < 10*time.Second {
+		// 	// Just created it 10s ago. Don't pick for compaction.
+		// 	continue
+		// }
 		if _, beingCompacted := s.cstatus.tables[t.ID()]; beingCompacted {
 			continue
 		}
@@ -1142,9 +1144,10 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 		s.cstatus.tables[t.ID()] = struct{}{}
 	}
 
-	// For L0->L0 compaction, we set the target file size to max, so the output is always one file.
+	// Note: Not sure why we need to do this.
+	// For L0->L0 compaction, we set the target file size to double, so the output is always one file.
 	// This significantly decreases the L0 table stalls and improves the performance.
-	cd.t.fileSz[0] = math.MaxUint32
+	// cd.t.fileSz[0] *= 2
 	return true
 }
 
