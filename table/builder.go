@@ -272,6 +272,8 @@ Structure of Block.
 */
 // In case the data is encrypted, the "IV" is added to the end of the block.
 func (b *Builder) finishBlock() {
+	y.AssertTrue(b.lastBm == nil) // Good safety check.
+
 	if len(b.curBlock.entryOffsets) == 0 {
 		return
 	}
@@ -405,6 +407,7 @@ func (b *Builder) addInternal(key []byte, vs y.ValueStruct, isStale bool) {
 	// In both cases, flush out lastKey.
 	version := y.ParseTs(key)
 	if y.SameKey(key, b.lastKey) {
+		y.AssertTrue(vs.Meta&y.BitRoar > 0)
 		if len(vs.Value) > 0 {
 			b.lastBm.Or(sroar.FromBuffer(vs.Value))
 		} else {
@@ -499,7 +502,9 @@ func (bd *buildData) Copy(dst []byte) int {
 }
 
 func (b *Builder) Done() buildData {
-	b.finishBlock() // This will never start a new block.
+	b.addLastKeyIfValid() // Ensure we picked up any sroar keys.
+	b.finishBlock()       // This will never start a new block.
+
 	if b.blockChan != nil {
 		close(b.blockChan)
 	}
