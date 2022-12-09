@@ -1112,14 +1112,11 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 
 	top := cd.thisLevel.tables
 	var out []*table.Table
-	now := time.Now()
+
+	maxSz := int64(float64(cd.t.fileSz[0]) * 0.9)
 	for _, t := range top {
-		if t.Size() >= 2*cd.t.fileSz[0] {
+		if t.Size() >= maxSz {
 			// This file is already big, don't include it.
-			continue
-		}
-		if now.Sub(t.CreatedAt) < 10*time.Second {
-			// Just created it 10s ago. Don't pick for compaction.
 			continue
 		}
 		if _, beingCompacted := s.cstatus.tables[t.ID()]; beingCompacted {
@@ -1142,9 +1139,13 @@ func (s *levelsController) fillTablesL0ToL0(cd *compactDef) bool {
 		s.cstatus.tables[t.ID()] = struct{}{}
 	}
 
+	// Note: I don't see why we should do the following. If L0 stalls, that's
+	// because the below levels are already busy running compactions. Then,
+	// probably better to just stay stalled.
+	//
 	// For L0->L0 compaction, we set the target file size to max, so the output is always one file.
 	// This significantly decreases the L0 table stalls and improves the performance.
-	cd.t.fileSz[0] = math.MaxUint32
+	// cd.t.fileSz[0] *= 2
 	return true
 }
 
@@ -1211,6 +1212,16 @@ func (s *levelsController) fillTablesL0ToLbase(cd *compactDef) bool {
 // cstatus to inf, so no other L0 -> Lbase compactions can happen.
 // Thus, L0 -> L0 must finish for the next L0 -> Lbase to begin.
 func (s *levelsController) fillTablesL0(cd *compactDef) bool {
+	opt := s.kv.opt
+	minSize := int64(opt.NumLevelZeroTables) * opt.MemTableSize
+	l0 := s.levels[0]
+	if l0.getTotalSize() < minSize {
+		// If we have really small tables, then no point merging them with base
+		// level. Instead, just merge them with each other, until we have a
+		// minimum size. Even if we can't run an L0 -> L0 compaction, just let
+		// it be, don't merge with Lbase.
+		return s.fillTablesL0ToL0(cd)
+	}
 	if ok := s.fillTablesL0ToLbase(cd); ok {
 		return true
 	}
