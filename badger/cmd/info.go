@@ -178,7 +178,6 @@ func showKeys(db *badger.DB, prefix []byte) error {
 	fmt.Print("\n[Summary]\n")
 	fmt.Println("Total Number of keys:", totalKeys)
 	return nil
-
 }
 
 func lookup(db *badger.DB) error {
